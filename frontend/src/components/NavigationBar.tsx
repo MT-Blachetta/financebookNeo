@@ -18,6 +18,7 @@ import styled from 'styled-components';
 import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { PaymentItem } from '../types';
+import { useImportCSV } from '../api/hooks';
 
 
 /* Types & Props  */
@@ -180,6 +181,11 @@ const CSVButtons = styled.div`
       color: var(--color-text-primary);
       border-color: #555;
     }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   }
 
   @media (max-width: 640px) {
@@ -198,6 +204,8 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
   onAdd,
 }) => {
   const navigate = useNavigate();
+  const importCsvMutation = useImportCSV();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleExportCSV = async () => {
     try {
@@ -274,6 +282,45 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
     }
   };
 
+  const handleImportCSVClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      alert('Please select a CSV file that was exported from FinanceBook.');
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const result = await importCsvMutation.mutateAsync(file);
+      alert(
+        `CSV import completed. Created ${result.created_payments} payments, ${result.created_recipients} recipients, updated ${result.updated_recipients} recipients, and created ${result.created_categories} categories.`
+      );
+    } catch (error: unknown) {
+      console.error('Error importing CSV:', error);
+      let message = 'Failed to import CSV. Please ensure the file matches the exported format.';
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as { response?: { data?: { detail?: string } } };
+        const detail = axiosError.response?.data?.detail;
+        if (typeof detail === 'string' && detail.trim().length > 0) {
+          message = detail;
+        }
+      } else if (error instanceof Error && error.message) {
+        message = error.message;
+      }
+      alert(message);
+    } finally {
+      event.target.value = '';
+    }
+  };
+
   return (
     <Bar>
       <LeftSection>
@@ -307,8 +354,17 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
 
       <RightSection>
         <CSVButtons>
-          <button>import CSV</button>
-          <button onClick={handleExportCSV}>export CSV</button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={handleImportFileChange}
+          />
+          <button type="button" onClick={handleImportCSVClick} disabled={importCsvMutation.isPending}>
+            {importCsvMutation.isPending ? 'importing…' : 'import CSV'}
+          </button>
+          <button type="button" onClick={handleExportCSV}>export CSV</button>
         </CSVButtons>
         {onAdd && <AddButton onClick={onAdd}>ADD</AddButton>}
         <MenuButton aria-label="Open Menu" onClick={onMenu}>

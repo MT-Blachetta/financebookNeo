@@ -103,6 +103,13 @@ class Recipient(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
     address: Optional[str] = None
+
+
+class RecipientUpdate(SQLModel):
+    """Schema for updating an existing recipient."""
+
+    name: Optional[str] = None
+    address: Optional[str] = None
     
 
 

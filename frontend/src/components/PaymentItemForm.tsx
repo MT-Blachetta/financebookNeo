@@ -11,7 +11,8 @@
  * 
  * The customer specifically requested to omit file upload functionality.
  */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { isAxiosError } from 'axios';
 import { useNavigate } from 'react-router-dom';
 import styled from 'styled-components';
 import { Recipient, Category, PaymentItemFormData, PaymentItem } from '../types';
@@ -20,6 +21,7 @@ import {
   useCategoriesByType,
   useCreatePaymentItem,
   useCreateRecipient,
+  useUpdateRecipient,
   useCreateCategory,
   useUploadInvoice,
   useDeleteInvoice,
@@ -144,15 +146,61 @@ const RecipientArea = styled.div`
   border: 1px solid #444;
 `;
 
-const RecipientDropdown = styled.select`
+const DropdownContainer = styled.div`
+  position: relative;
+  margin-bottom: 1rem;
+`;
+
+const DropdownSearchInput = styled.input<{ disabled?: boolean }>`
   width: 100%;
   padding: 0.75rem;
   border: 1px solid #444;
   border-radius: var(--radius-md);
-  background: #333;
+  background: ${props => (props.disabled ? '#2a2a2a' : '#333')};
   color: var(--color-text-primary);
-  margin-bottom: 1rem;
+  box-sizing: border-box;
+  cursor: ${props => (props.disabled ? 'not-allowed' : 'text')};
+
+  &:focus {
+    outline: none;
+    border-color: var(--color-positive);
+  }
 `;
+
+const DropdownList = styled.ul`
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  width: 100%;
+  max-height: 200px;
+  overflow-y: auto;
+  border: 1px solid #444;
+  border-radius: var(--radius-md);
+  background: #2a2a2a;
+  list-style: none;
+  margin: 0;
+  padding: 0.25rem 0;
+  z-index: 10;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+`;
+
+const DropdownOption = styled.li<{ isSelected?: boolean }>`
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+  background: ${props => (props.isSelected ? '#3a3a3a' : 'transparent')};
+  color: var(--color-text-primary);
+
+  &:hover {
+    background: #444;
+  }
+`;
+
+const DropdownMessage = styled.li`
+  padding: 0.5rem 0.75rem;
+  color: var(--color-text-secondary);
+`;
+
+const normalizeWhitespace = (value: string): string => value.trim().replace(/\s+/g, ' ');
 
 const RecipientInput = styled.input`
   width: 100%;
@@ -194,15 +242,6 @@ const CategoryArea = styled.div`
   border: 1px solid #444;
 `;
 
-const CategoryDropdown = styled.select`
-  width: 100%;
-  padding: 0.75rem;
-  border: 1px solid #444;
-  border-radius: var(--radius-md);
-  background: #333;
-  color: var(--color-text-primary);
-  margin-bottom: 1rem;
-`;
 
 const CategoryInputContainer = styled.div`
   display: flex;
@@ -428,6 +467,10 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
   const [recipientName, setRecipientName] = useState<string>('');
   const [recipientAddress, setRecipientAddress] = useState<string>('');
   const [recipientModified, setRecipientModified] = useState<boolean>(false);
+  const [isRecipientDropdownOpen, setIsRecipientDropdownOpen] = useState<boolean>(false);
+  const [recipientSearchTerm, setRecipientSearchTerm] = useState<string>('');
+
+  const recipientDropdownRef = useRef<HTMLDivElement | null>(null);
 
   // category state - prioritize standard_category_id over categories array
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>(() => {
@@ -440,6 +483,10 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
     return '';
   });
   const [newCategoryName, setNewCategoryName] = useState<string>('');
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
+  const [categorySearchTerm, setCategorySearchTerm] = useState<string>('');
+
+  const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
   
   // error state
   const [error, setError] = useState<string | null>(null);
@@ -458,9 +505,32 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
   const { data: categories, isLoading: loadingCategories } = useCategoriesByType(1); // Type ID 1 = "standard"
   const createPaymentMutation = useCreatePaymentItem();
   const createRecipientMutation = useCreateRecipient();
+  const updateRecipientMutation = useUpdateRecipient();
   const createCategoryMutation = useCreateCategory();
   const uploadInvoiceMutation = useUploadInvoice();
   const deleteInvoiceMutation = useDeleteInvoice();
+
+  const availableCategories = useMemo(
+    () => (categories ?? []).filter((cat) => cat.name !== 'UNCLASSIFIED'),
+    [categories]
+  );
+
+  const filteredRecipients = useMemo(() => {
+    const term = recipientSearchTerm.trim().toLowerCase();
+    if (!recipients) return [] as Recipient[];
+    if (!term) return recipients;
+    return recipients.filter((recipient) =>
+      recipient.name.toLowerCase().startsWith(term)
+    );
+  }, [recipients, recipientSearchTerm]);
+
+  const filteredCategories = useMemo(() => {
+    const term = categorySearchTerm.trim().toLowerCase();
+    if (!term) return availableCategories;
+    return availableCategories.filter((category) =>
+      category.name.toLowerCase().startsWith(term)
+    );
+  }, [availableCategories, categorySearchTerm]);
 
   // when initialData is loaded asynchronously, populate form state
   useEffect(() => {
@@ -481,21 +551,91 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
     }
   }, [initialData]);
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        recipientDropdownRef.current &&
+        !recipientDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsRecipientDropdownOpen(false);
+      }
+
+      if (
+        categoryDropdownRef.current &&
+        !categoryDropdownRef.current.contains(event.target as Node)
+      ) {
+        setIsCategoryDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (selectedRecipientId && recipients) {
+      const recipient = recipients.find((r) => r.id.toString() === selectedRecipientId);
+      if (recipient) {
+        setRecipientSearchTerm(recipient.name);
+        setRecipientName((prev) => (prev ? prev : recipient.name));
+        setRecipientAddress((prev) => (prev ? prev : recipient.address || ''));
+      }
+    } else if (!selectedRecipientId) {
+      setRecipientSearchTerm('');
+    }
+  }, [selectedRecipientId, recipients]);
+
+  useEffect(() => {
+    if (selectedCategoryId) {
+      const category = availableCategories.find(
+        (cat) => cat.id.toString() === selectedCategoryId
+      );
+      if (category) {
+        setCategorySearchTerm(category.name);
+      }
+    } else {
+      setCategorySearchTerm('');
+    }
+  }, [selectedCategoryId, availableCategories]);
+
   // handle recipient selection from dropdown
   const handleRecipientSelect = (recipientId: string) => {
     setSelectedRecipientId(recipientId);
     setRecipientModified(false);
-    
+
     if (recipientId && recipients) {
       const recipient = recipients.find(r => r.id.toString() === recipientId);
       if (recipient) {
         setRecipientName(recipient.name);
         setRecipientAddress(recipient.address || '');
+        setRecipientSearchTerm(recipient.name);
       }
     } else {
       setRecipientName('');
       setRecipientAddress('');
+      setRecipientSearchTerm('');
     }
+
+    setIsRecipientDropdownOpen(false);
+  };
+
+  const handleCategorySelect = (categoryId: string) => {
+    setSelectedCategoryId(categoryId);
+
+    if (categoryId) {
+      const category = availableCategories.find(
+        (cat) => cat.id.toString() === categoryId
+      );
+      if (category) {
+        setCategorySearchTerm(category.name);
+      }
+    } else {
+      setCategorySearchTerm('');
+    }
+
+    setIsCategoryDropdownOpen(false);
   };
 
   // track recipient modifications
@@ -515,7 +655,8 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
 
   // handle recipient creation
   const handleAddRecipient = async () => {
-    if (!recipientName.trim()) {
+    const sanitizedName = normalizeWhitespace(recipientName);
+    if (!sanitizedName) {
       setError('Recipient name is required');
       return;
     }
@@ -526,42 +667,114 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
       return;
     }
 
+    const trimmedAddressValue = recipientAddress.trim();
+    const addressPayload = trimmedAddressValue ? trimmedAddressValue : null;
+
+    // if a recipient is selected, update it instead of creating a duplicate
+    if (selectedRecipientId) {
+      try {
+        const updatedRecipient = await updateRecipientMutation.mutateAsync({
+          id: Number(selectedRecipientId),
+          name: sanitizedName,
+          address: addressPayload,
+        });
+
+        setRecipientName(updatedRecipient.name);
+        setRecipientAddress(updatedRecipient.address ?? '');
+        setRecipientSearchTerm(updatedRecipient.name);
+        setRecipientModified(false);
+        setIsRecipientDropdownOpen(false);
+        setError(null);
+      } catch (error) {
+        console.error('Error updating recipient:', error);
+        if (isAxiosError(error) && error.response?.data?.detail) {
+          setError(String(error.response.data.detail));
+        } else {
+          setError('Failed to update recipient. Please try again.');
+        }
+      }
+      return;
+    }
+
+    // prevent creating duplicates by comparing normalized names
+    const duplicateRecipient = recipients?.find(
+      (existing) => normalizeWhitespace(existing.name) === sanitizedName
+    );
+
+    if (duplicateRecipient) {
+      setError('Recipient name already exists. Select it to update instead.');
+      setSelectedRecipientId(duplicateRecipient.id.toString());
+      setRecipientName(duplicateRecipient.name);
+      setRecipientAddress(
+        trimmedAddressValue
+          ? trimmedAddressValue
+          : duplicateRecipient.address ?? ''
+      );
+      setRecipientSearchTerm(duplicateRecipient.name);
+      setIsRecipientDropdownOpen(false);
+      return;
+    }
+
     try {
       const newRecipient = await createRecipientMutation.mutateAsync({
-        name: recipientName.trim(),
-        address: recipientAddress.trim() || null,
+        name: sanitizedName,
+        address: addressPayload,
       });
-      
+
       // select the newly created recipient
       setSelectedRecipientId(newRecipient.id.toString());
+      setRecipientName(newRecipient.name);
+      setRecipientAddress(newRecipient.address ?? '');
       setRecipientModified(false);
+      setRecipientSearchTerm(newRecipient.name);
+      setIsRecipientDropdownOpen(false);
       setError(null);
-      
+
     } catch (error) {
       console.error('Error creating recipient:', error);
-      setError('Failed to create recipient. Please try again.');
+      if (isAxiosError(error) && error.response?.data?.detail) {
+        setError(String(error.response.data.detail));
+      } else {
+        setError('Failed to create recipient. Please try again.');
+      }
     }
   };
 
   // create a new category immediately and select it
   const handleAddCategory = async () => {
-    const name = newCategoryName.trim();
-    if (!name) return;
-    
+    const sanitizedName = normalizeWhitespace(newCategoryName);
+    if (!sanitizedName) return;
+
     // check for semicolons in category name
-    if (name.includes(';')) {
+    if (sanitizedName.includes(';')) {
       setShowSemicolonDialog(true);
       return;
     }
-    
+
+    const duplicateCategory = availableCategories.find(
+      (category) => normalizeWhitespace(category.name) === sanitizedName
+    );
+
+    if (duplicateCategory) {
+      setError('Category name already exists. Select it instead.');
+      setSelectedCategoryId(duplicateCategory.id.toString());
+      setCategorySearchTerm(duplicateCategory.name);
+      setNewCategoryName('');
+      setIsCategoryDropdownOpen(false);
+      return;
+    }
+
     try {
       const newCat = await createCategoryMutation.mutateAsync({
-        name,
+        name: sanitizedName,
         type_id: 1, // default category type
         parent_id: null,
       });
       setSelectedCategoryId(newCat.id.toString());
+      setCategorySearchTerm(newCat.name);
+      setIsCategoryDropdownOpen(false);
       setNewCategoryName('');
+      setError(null);
     } catch (err) {
       console.error('Error creating category:', err);
       setError('Failed to create category. Please try again.');
@@ -898,19 +1111,71 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
         <FormField>
           <Label>Recipient</Label>
           <RecipientArea>
-            <RecipientDropdown
-              value={selectedRecipientId}
-              onChange={(e) => handleRecipientSelect(e.target.value)}
-              disabled={loadingRecipients}
-            >
-              <option value="">-- Select Recipient (Optional) --</option>
-              {recipients?.map((recipient) => (
-                <option key={recipient.id} value={recipient.id.toString()}>
-                  {recipient.name}
-                </option>
-              ))}
-            </RecipientDropdown>
-            
+            <DropdownContainer ref={recipientDropdownRef}>
+              <DropdownSearchInput
+                type="text"
+                placeholder={
+                  loadingRecipients ? 'Loading recipients...' : 'Search recipient...'
+                }
+                value={recipientSearchTerm}
+                onChange={(e) => {
+                  setRecipientSearchTerm(e.target.value);
+                  if (!loadingRecipients) {
+                    setIsRecipientDropdownOpen(true);
+                  }
+                }}
+                onFocus={() => {
+                  if (!loadingRecipients) {
+                    setIsRecipientDropdownOpen(true);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setIsRecipientDropdownOpen(false);
+                  }
+
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (!recipientSearchTerm.trim()) {
+                      handleRecipientSelect('');
+                    } else if (filteredRecipients.length > 0) {
+                      handleRecipientSelect(filteredRecipients[0].id.toString());
+                    }
+                  }
+                }}
+                disabled={loadingRecipients}
+              />
+              {isRecipientDropdownOpen && (
+                <DropdownList>
+                  {loadingRecipients ? (
+                    <DropdownMessage>Loading recipients...</DropdownMessage>
+                  ) : (
+                    <>
+                      <DropdownOption
+                        isSelected={selectedRecipientId === ''}
+                        onMouseDown={() => handleRecipientSelect('')}
+                      >
+                        -- Select Recipient (Optional) --
+                      </DropdownOption>
+                      {filteredRecipients.length > 0 ? (
+                        filteredRecipients.map((recipient) => (
+                          <DropdownOption
+                            key={recipient.id}
+                            isSelected={selectedRecipientId === recipient.id.toString()}
+                            onMouseDown={() => handleRecipientSelect(recipient.id.toString())}
+                          >
+                            {recipient.name}
+                          </DropdownOption>
+                        ))
+                      ) : (
+                        <DropdownMessage>No matching recipients</DropdownMessage>
+                      )}
+                    </>
+                  )}
+                </DropdownList>
+              )}
+            </DropdownContainer>
+
             <RecipientInput
               type="text"
               placeholder="Name"
@@ -939,19 +1204,71 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
         <FormField>
           <Label>Category</Label>
           <CategoryArea>
-            <CategoryDropdown
-              value={selectedCategoryId}
-              onChange={(e) => setSelectedCategoryId(e.target.value)}
-              disabled={loadingCategories}
-            >
-              <option value="">-- Select Category (Optional) --</option>
-              {categories?.filter(cat => cat.name !== "UNCLASSIFIED").map((category) => (
-                <option key={category.id} value={category.id.toString()}>
-                  {category.name}
-                </option>
-              ))}
-            </CategoryDropdown>
-            
+            <DropdownContainer ref={categoryDropdownRef}>
+              <DropdownSearchInput
+                type="text"
+                placeholder={
+                  loadingCategories ? 'Loading categories...' : 'Search category...'
+                }
+                value={categorySearchTerm}
+                onChange={(e) => {
+                  setCategorySearchTerm(e.target.value);
+                  if (!loadingCategories) {
+                    setIsCategoryDropdownOpen(true);
+                  }
+                }}
+                onFocus={() => {
+                  if (!loadingCategories) {
+                    setIsCategoryDropdownOpen(true);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    setIsCategoryDropdownOpen(false);
+                  }
+
+                  if (event.key === 'Enter') {
+                    event.preventDefault();
+                    if (!categorySearchTerm.trim()) {
+                      handleCategorySelect('');
+                    } else if (filteredCategories.length > 0) {
+                      handleCategorySelect(filteredCategories[0].id.toString());
+                    }
+                  }
+                }}
+                disabled={loadingCategories}
+              />
+              {isCategoryDropdownOpen && (
+                <DropdownList>
+                  {loadingCategories ? (
+                    <DropdownMessage>Loading categories...</DropdownMessage>
+                  ) : (
+                    <>
+                      <DropdownOption
+                        isSelected={selectedCategoryId === ''}
+                        onMouseDown={() => handleCategorySelect('')}
+                      >
+                        -- Select Category (Optional) --
+                      </DropdownOption>
+                      {filteredCategories.length > 0 ? (
+                        filteredCategories.map((category) => (
+                          <DropdownOption
+                            key={category.id}
+                            isSelected={selectedCategoryId === category.id.toString()}
+                            onMouseDown={() => handleCategorySelect(category.id.toString())}
+                          >
+                            {category.name}
+                          </DropdownOption>
+                        ))
+                      ) : (
+                        <DropdownMessage>No matching categories</DropdownMessage>
+                      )}
+                    </>
+                  )}
+                </DropdownList>
+              )}
+            </DropdownContainer>
+
             <CategoryInputContainer>
               <CategoryInput
                 type="text"

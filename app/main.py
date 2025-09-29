@@ -1,8 +1,10 @@
 from typing import List, Optional
+from datetime import datetime
 
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
 from pathlib import Path
+import re
 import shutil
 from sqlmodel import Session, select
 
@@ -16,8 +18,15 @@ from app.models import (
     Category,
     CategoryUpdate,
     Recipient,
+    RecipientUpdate,
     PaymentItemCategoryLink, # import for joining
 )
+
+
+CSV_HEADER = "amount;date;description;Recipient name;Recipient address;standard_category name;periodic"
+AMOUNT_PATTERN = re.compile(r"^-?\d+(?:\.\d+)?$")
+DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+BOOLEAN_PATTERN = re.compile(r"^(true|false)$", re.IGNORECASE)
 
 app = FastAPI(title="FinanceBook API", version="0.1.0")
 
@@ -28,6 +37,14 @@ ICON_DIR.mkdir(exist_ok=True)
 # directory where uploaded invoice files are stored
 INVOICE_DIR = Path("app/invoices")
 INVOICE_DIR.mkdir(exist_ok=True)
+
+
+def _normalize_name(raw_name: str) -> str:
+    """Normalize user provided names by collapsing whitespace."""
+
+    # First strip leading/trailing whitespace, then collapse internal runs
+    # of whitespace characters (spaces, tabs, newlines) into single spaces.
+    return re.sub(r"\s+", " ", raw_name.strip())
 
 
 @app.on_event("startup")
@@ -381,6 +398,18 @@ def list_category_types(session: Session = Depends(get_session)) -> List[Categor
 
 @app.post("/categories", response_model=Category)
 def create_category(category: Category, session: Session = Depends(get_session)) -> Category:
+    normalized_name = _normalize_name(category.name)
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="Category name cannot be empty")
+
+    # ensure the normalized name is unique across all categories
+    existing_categories = session.exec(select(Category)).all()
+    for existing in existing_categories:
+        if _normalize_name(existing.name) == normalized_name:
+            raise HTTPException(status_code=400, detail="Category name already exists")
+
+    category.name = normalized_name
+
     # Parent/type validation
     if category.parent_id and not session.get(Category, category.parent_id):
         raise HTTPException(status_code=404, detail="Parent category not found")
@@ -404,6 +433,18 @@ def update_category(
         raise HTTPException(status_code=404, detail="Category not found")
 
     update_data = category_update.dict(exclude_unset=True)
+
+    if "name" in update_data and update_data["name"] is not None:
+        normalized_name = _normalize_name(update_data["name"])
+        if not normalized_name:
+            raise HTTPException(status_code=400, detail="Category name cannot be empty")
+
+        existing_categories = session.exec(select(Category).where(Category.id != category_id)).all()
+        for existing in existing_categories:
+            if _normalize_name(existing.name) == normalized_name:
+                raise HTTPException(status_code=400, detail="Category name already exists")
+
+        update_data["name"] = normalized_name
 
     if "parent_id" in update_data and update_data["parent_id"] is not None:
         if not session.get(Category, update_data["parent_id"]):
@@ -470,6 +511,18 @@ def list_all_categories(session: Session = Depends(get_session)) -> List[Categor
 
 @app.post("/recipients", response_model=Recipient)
 def create_recipient(recipient: Recipient, session: Session = Depends(get_session)) -> Recipient:
+    normalized_name = _normalize_name(recipient.name)
+    if not normalized_name:
+        raise HTTPException(status_code=400, detail="Recipient name cannot be empty")
+
+    existing_recipients = session.exec(select(Recipient)).all()
+    for existing in existing_recipients:
+        if _normalize_name(existing.name) == normalized_name:
+            raise HTTPException(status_code=400, detail="Recipient name already exists")
+
+    recipient.name = normalized_name
+    recipient.address = recipient.address.strip() if recipient.address else None
+
     session.add(recipient)
     session.commit()
     session.refresh(recipient)
@@ -489,6 +542,43 @@ def get_recipient(
     recipient = session.get(Recipient, recipient_id)
     if not recipient:
         raise HTTPException(status_code=404, detail="Recipient not found")
+    return recipient
+
+
+@app.put("/recipients/{recipient_id}", response_model=Recipient)
+def update_recipient(
+    recipient_id: int,
+    recipient_update: RecipientUpdate,
+    session: Session = Depends(get_session),
+) -> Recipient:
+    recipient = session.get(Recipient, recipient_id)
+    if not recipient:
+        raise HTTPException(status_code=404, detail="Recipient not found")
+
+    update_data = recipient_update.dict(exclude_unset=True)
+
+    if "name" in update_data and update_data["name"] is not None:
+        normalized_name = _normalize_name(update_data["name"])
+        if not normalized_name:
+            raise HTTPException(status_code=400, detail="Recipient name cannot be empty")
+
+        existing_recipients = session.exec(select(Recipient).where(Recipient.id != recipient_id)).all()
+        for existing in existing_recipients:
+            if _normalize_name(existing.name) == normalized_name:
+                raise HTTPException(status_code=400, detail="Recipient name already exists")
+
+        update_data["name"] = normalized_name
+
+    if "address" in update_data:
+        address_value = update_data["address"]
+        update_data["address"] = address_value.strip() if address_value else None
+
+    for key, value in update_data.items():
+        setattr(recipient, key, value)
+
+    session.add(recipient)
+    session.commit()
+    session.refresh(recipient)
     return recipient
 
 
@@ -591,6 +681,200 @@ def upload_invoice(
         "message": "Invoice uploaded successfully",
         "filename": unique_filename,
         "payment_item_id": payment_item_id
+    }
+
+
+@app.post("/import-csv")
+def import_csv(
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Import payment items, recipients, and categories from an exported CSV file."""
+
+    filename = file.filename or ""
+    if not filename.lower().endswith(".csv"):
+        raise HTTPException(status_code=400, detail="Uploaded file must be a CSV file")
+
+    try:
+        raw_bytes = file.file.read()
+    except Exception as exc:  # pragma: no cover - defensive
+        raise HTTPException(status_code=400, detail="Unable to read uploaded file") from exc
+
+    try:
+        text_content = raw_bytes.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="CSV file must be UTF-8 encoded")
+
+    lines = text_content.splitlines()
+    if not lines:
+        raise HTTPException(status_code=400, detail="Uploaded CSV file is empty")
+
+    header_validated = False
+    data_rows: list[tuple[int, str]] = []
+    for index, raw_line in enumerate(lines, start=1):
+        if not raw_line.strip():
+            continue  # ignore blank lines
+        if not header_validated:
+            if raw_line.strip() != CSV_HEADER:
+                raise HTTPException(status_code=400, detail="CSV header does not match the expected export format")
+            header_validated = True
+            continue
+        data_rows.append((index, raw_line))
+
+    if not header_validated:
+        raise HTTPException(status_code=400, detail="CSV header is missing")
+
+    if not data_rows:
+        raise HTTPException(status_code=400, detail="CSV file does not contain any data rows")
+
+    parsed_rows = []
+    for line_number, raw_line in data_rows:
+        parts = raw_line.split(";")
+        if len(parts) != 7:
+            raise HTTPException(status_code=400, detail=f"Row {line_number} does not match the expected format")
+
+        amount_str = parts[0].strip()
+        date_str = parts[1].strip()
+        description = parts[2].strip()
+        recipient_name = parts[3].strip()
+        recipient_address = parts[4].strip()
+        category_name = parts[5].strip()
+        periodic_str = parts[6].strip().lower()
+
+        if not AMOUNT_PATTERN.match(amount_str):
+            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid amount")
+        if not DATE_PATTERN.match(date_str):
+            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid date")
+        if not BOOLEAN_PATTERN.match(periodic_str):
+            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid periodic flag")
+
+        try:
+            amount = float(amount_str)
+        except ValueError as exc:  # pragma: no cover - guarded by regex
+            raise HTTPException(status_code=400, detail=f"Row {line_number} contains an unreadable amount") from exc
+
+        try:
+            date_value = datetime.strptime(date_str, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid date value")
+
+        normalized_recipient = _normalize_name(recipient_name) if recipient_name else ""
+        normalized_category = _normalize_name(category_name) if category_name else ""
+
+        parsed_rows.append(
+            {
+                "amount": amount,
+                "date": date_value,
+                "description": description or None,
+                "recipient_name": recipient_name,
+                "recipient_address": recipient_address or None,
+                "category_name": category_name,
+                "periodic": periodic_str == "true",
+                "normalized_recipient": normalized_recipient,
+                "normalized_category": normalized_category,
+            }
+        )
+
+    # Collect the latest recipient data for each unique name (last occurrence wins)
+    recipient_import_data: dict[str, dict[str, Optional[str]]] = {}
+    for row in parsed_rows:
+        if row["normalized_recipient"]:
+            recipient_import_data[row["normalized_recipient"]] = {
+                "address": row["recipient_address"].strip() if row["recipient_address"] else None
+            }
+
+    # Collect categories referenced in the CSV (only standard category is exported)
+    category_names = {
+        row["normalized_category"]
+        for row in parsed_rows
+        if row["normalized_category"]
+    }
+
+    # Fetch existing recipients and categories from the database for deduplication
+    existing_recipients = session.exec(select(Recipient)).all()
+    recipient_lookup = {_normalize_name(rec.name): rec for rec in existing_recipients}
+
+    existing_categories = session.exec(select(Category)).all()
+    category_lookup = {_normalize_name(cat.name): cat for cat in existing_categories}
+
+    standard_type = session.exec(select(CategoryType).where(CategoryType.name == "standard")).first()
+    if not standard_type:
+        raise HTTPException(status_code=500, detail="Standard category type is not configured")
+
+    default_category = session.exec(select(Category).where(Category.name == "UNCLASSIFIED")).first()
+
+    created_recipients = 0
+    updated_recipients = 0
+    recipient_ids: dict[str, int] = {}
+
+    for name, data in recipient_import_data.items():
+        address = data["address"]
+        existing = recipient_lookup.get(name)
+        if existing:
+            normalized_address = address if address else None
+            if (existing.address or None) != normalized_address:
+                existing.address = normalized_address
+                session.add(existing)
+                updated_recipients += 1
+            recipient_ids[name] = existing.id
+        else:
+            new_recipient = Recipient(name=name, address=address)
+            session.add(new_recipient)
+            session.flush()
+            recipient_ids[name] = new_recipient.id
+            created_recipients += 1
+
+    created_categories = 0
+    category_ids: dict[str, int] = {}
+    for name in category_names:
+        existing_category = category_lookup.get(name)
+        if existing_category:
+            category_ids[name] = existing_category.id
+            continue
+
+        new_category = Category(name=name, type_id=standard_type.id, parent_id=None)
+        session.add(new_category)
+        session.flush()
+        category_ids[name] = new_category.id
+        created_categories += 1
+
+    created_payments = 0
+
+    for row in parsed_rows:
+        recipient_id = None
+        if row["normalized_recipient"]:
+            recipient_id = recipient_ids.get(row["normalized_recipient"])
+
+        category_id = None
+        if row["normalized_category"]:
+            category_id = category_ids.get(row["normalized_category"])
+        elif default_category:
+            category_id = default_category.id
+
+        payment_item = PaymentItem(
+            amount=row["amount"],
+            date=row["date"],
+            periodic=row["periodic"],
+            description=row["description"],
+            recipient_id=recipient_id,
+            standard_category_id=category_id,
+        )
+        session.add(payment_item)
+        session.flush()
+
+        if category_id:
+            link = PaymentItemCategoryLink(payment_item_id=payment_item.id, category_id=category_id)
+            session.add(link)
+
+        created_payments += 1
+
+    session.commit()
+
+    return {
+        "created_payments": created_payments,
+        "created_recipients": created_recipients,
+        "updated_recipients": updated_recipients,
+        "created_categories": created_categories,
     }
 
 
