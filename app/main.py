@@ -1,14 +1,23 @@
 from typing import List, Optional
 from datetime import datetime
 
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
-from fastapi.responses import FileResponse
-from pathlib import Path
+import csv
+import io
 import re
 import shutil
+from pathlib import Path
+
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
+from fastapi.responses import FileResponse
 from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, get_session
+from app.constants import (
+    MAX_CATEGORY_NAME_LENGTH,
+    MAX_DESCRIPTION_LENGTH,
+    MAX_RECIPIENT_ADDRESS_LENGTH,
+    MAX_RECIPIENT_NAME_LENGTH,
+)
 from app.models import (
     PaymentItem,
     PaymentItemCreate,
@@ -23,7 +32,16 @@ from app.models import (
 )
 
 
-CSV_HEADER = "amount;date;description;Recipient name;Recipient address;standard_category name;periodic"
+CSV_HEADER_FIELDS = [
+    "amount",
+    "date",
+    "description",
+    "Recipient name",
+    "Recipient address",
+    "standard_category name",
+    "periodic",
+]
+CSV_HEADER = ";".join(CSV_HEADER_FIELDS)
 AMOUNT_PATTERN = re.compile(r"^-?\d+(?:\.\d+)?$")
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BOOLEAN_PATTERN = re.compile(r"^(true|false)$", re.IGNORECASE)
@@ -705,58 +723,87 @@ def import_csv(
     except UnicodeDecodeError:
         raise HTTPException(status_code=400, detail="CSV file must be UTF-8 encoded")
 
-    lines = text_content.splitlines()
-    if not lines:
+    csv_stream = io.StringIO(text_content)
+    reader = csv.reader(csv_stream, delimiter=";", quotechar='"')
+
+    try:
+        header_row = next(reader)
+    except StopIteration:
         raise HTTPException(status_code=400, detail="Uploaded CSV file is empty")
 
-    header_validated = False
-    data_rows: list[tuple[int, str]] = []
-    for index, raw_line in enumerate(lines, start=1):
-        if not raw_line.strip():
-            continue  # ignore blank lines
-        if not header_validated:
-            if raw_line.strip() != CSV_HEADER:
-                raise HTTPException(status_code=400, detail="CSV header does not match the expected export format")
-            header_validated = True
-            continue
-        data_rows.append((index, raw_line))
-
-    if not header_validated:
-        raise HTTPException(status_code=400, detail="CSV header is missing")
-
-    if not data_rows:
-        raise HTTPException(status_code=400, detail="CSV file does not contain any data rows")
+    normalized_header = [cell.strip() for cell in header_row]
+    if ";".join(normalized_header) != CSV_HEADER:
+        raise HTTPException(status_code=400, detail="CSV header does not match the expected export format")
 
     parsed_rows = []
-    for line_number, raw_line in data_rows:
-        parts = raw_line.split(";")
-        if len(parts) != 7:
-            raise HTTPException(status_code=400, detail=f"Row {line_number} does not match the expected format")
+    for row_index, row in enumerate(reader, start=2):
+        if not row or not any(cell.strip() for cell in row):
+            continue  # ignore completely blank rows
 
-        amount_str = parts[0].strip()
-        date_str = parts[1].strip()
-        description = parts[2].strip()
-        recipient_name = parts[3].strip()
-        recipient_address = parts[4].strip()
-        category_name = parts[5].strip()
-        periodic_str = parts[6].strip().lower()
+        if len(row) != len(CSV_HEADER_FIELDS):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Row {row_index} does not match the expected format",
+            )
+
+        amount_str = row[0].strip()
+        date_str = row[1].strip()
+        raw_description = row[2].replace("\r\n", "\n").replace("\r", "\n")
+        raw_recipient_name = row[3]
+        raw_recipient_address = row[4].replace("\r\n", "\n").replace("\r", "\n")
+        raw_category_name = row[5]
+        periodic_str = row[6].strip().lower()
+
+        description = raw_description.strip()
+        recipient_name = raw_recipient_name.strip()
+        recipient_address = raw_recipient_address.strip()
+        category_name = raw_category_name.strip()
 
         if not AMOUNT_PATTERN.match(amount_str):
-            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid amount")
+            raise HTTPException(status_code=400, detail=f"Row {row_index} has an invalid amount")
         if not DATE_PATTERN.match(date_str):
-            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid date")
+            raise HTTPException(status_code=400, detail=f"Row {row_index} has an invalid date")
         if not BOOLEAN_PATTERN.match(periodic_str):
-            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid periodic flag")
+            raise HTTPException(status_code=400, detail=f"Row {row_index} has an invalid periodic flag")
+
+        if description and len(description) > MAX_DESCRIPTION_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Row {row_index} description exceeds {MAX_DESCRIPTION_LENGTH} characters"
+                ),
+            )
+        if recipient_name and len(recipient_name) > MAX_RECIPIENT_NAME_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Row {row_index} recipient name exceeds {MAX_RECIPIENT_NAME_LENGTH} characters"
+                ),
+            )
+        if recipient_address and len(recipient_address) > MAX_RECIPIENT_ADDRESS_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Row {row_index} recipient address exceeds {MAX_RECIPIENT_ADDRESS_LENGTH} characters"
+                ),
+            )
+        if category_name and len(category_name) > MAX_CATEGORY_NAME_LENGTH:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Row {row_index} category name exceeds {MAX_CATEGORY_NAME_LENGTH} characters"
+                ),
+            )
 
         try:
             amount = float(amount_str)
         except ValueError as exc:  # pragma: no cover - guarded by regex
-            raise HTTPException(status_code=400, detail=f"Row {line_number} contains an unreadable amount") from exc
+            raise HTTPException(status_code=400, detail=f"Row {row_index} contains an unreadable amount") from exc
 
         try:
             date_value = datetime.strptime(date_str, "%Y-%m-%d")
         except ValueError:
-            raise HTTPException(status_code=400, detail=f"Row {line_number} has an invalid date value")
+            raise HTTPException(status_code=400, detail=f"Row {row_index} has an invalid date value")
 
         normalized_recipient = _normalize_name(recipient_name) if recipient_name else ""
         normalized_category = _normalize_name(category_name) if category_name else ""
@@ -775,12 +822,15 @@ def import_csv(
             }
         )
 
+    if not parsed_rows:
+        raise HTTPException(status_code=400, detail="CSV file does not contain any data rows")
+
     # Collect the latest recipient data for each unique name (last occurrence wins)
     recipient_import_data: dict[str, dict[str, Optional[str]]] = {}
     for row in parsed_rows:
         if row["normalized_recipient"]:
             recipient_import_data[row["normalized_recipient"]] = {
-                "address": row["recipient_address"].strip() if row["recipient_address"] else None
+                "address": row["recipient_address"] if row["recipient_address"] else None
             }
 
     # Collect categories referenced in the CSV (only standard category is exported)
