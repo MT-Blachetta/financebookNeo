@@ -46,6 +46,7 @@ const Content = styled.main`
   max-width: 48rem; /* keep readable line-length on desktop */
   margin-inline: auto;
   padding: 1rem;
+  padding-bottom: 80px; /* Add padding to prevent content from being hidden behind fixed pagination footer */
   color: #eaeaea; /* light grey text for contrast on black */
 `;
 
@@ -62,16 +63,24 @@ const App: React.FC = () => {
 
   /**
    * Handles filter changes from the global NavigationBar.
-   * Currently, it navigates to the summary page with the selected filter as a query parameter.
+   * Preserves existing category filters when changing the view filter.
    * Also closes the drawer if it's open.
    * @param filter - The selected ViewFilter ('all', 'expenses', 'incomes').
    */
   const handleGlobalNavFilterChange = (filter: ViewFilter) => {
+    // Preserve existing category filters from current URL
+    const newSearchParams = new URLSearchParams(searchParams);
+    
+    // Update or remove the filter parameter
     if (filter === 'all') {
-      navigate('/');
+      newSearchParams.delete('filter');
     } else {
-      navigate(`/?filter=${filter}`);
+      newSearchParams.set('filter', filter);
     }
+    
+    // Navigate with preserved parameters
+    const queryString = newSearchParams.toString();
+    navigate(queryString ? `/?${queryString}` : '/');
     setIsDrawerOpen(false);
   };
 
@@ -131,7 +140,6 @@ const App: React.FC = () => {
         onChange={handleGlobalNavFilterChange}
         onMenu={handleMenuClick}
         onAdd={handleAddClick}
-        onCategories={() => navigate('/categories')}
       />
       <NavigationDrawer />
 

@@ -1,3 +1,4 @@
+
 /**
  * "Summary" screen – displays all payment items in a descending timeline with a
  * running total at the end.  Users can filter by incomes/expenses via the
@@ -367,6 +368,99 @@ const TotalLabel = styled.div`
     font-size: 1.2rem; //  sets the font size.
 `;
 
+// Footer-style pagination container - fixed at bottom
+const PaginationFooter = styled.div`
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #1a1a1a;
+  border-top: 1px solid #333;
+  padding: 0.75rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 100;
+  min-height: 60px;
+`;
+
+// Left side controls (show button + input + ALL button)
+const PaginationLeft = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+// Right side controls (page info + previous/next buttons)
+const PaginationRight = styled.div`
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+`;
+
+// Pagination button styling
+const PaginationButton = styled.button<{ $disabled?: boolean }>`
+  background: ${({ $disabled }) => ($disabled ? '#555' : '#007bff')};
+  color: ${({ $disabled }) => ($disabled ? '#888' : 'white')};
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  cursor: ${({ $disabled }) => ($disabled ? 'not-allowed' : 'pointer')};
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: ${({ $disabled}) => ($disabled ? '#555' : '#0056b3')};
+  }
+`;
+
+// ALL button styling (black button)
+const AllButton = styled.button`
+  background: #000;
+  color: white;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+
+  &:hover {
+    background: #333;
+  }
+`;
+
+// Number input for items per page
+const PaginationInput = styled.input`
+  width: 60px;
+  padding: 0.5rem;
+  background-color: #333;
+  color: #eaeaea;
+  border: 1px solid #555;
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  text-align: center;
+
+  &:focus {
+    outline: none;
+    border-color: #007bff;
+  }
+
+  /* Remove spinner arrows */
+  &::-webkit-inner-spin-button,
+  &::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  -moz-appearance: textfield;
+`;
+
+// Page info text
+const PageInfo = styled.span`
+  color: #aaa;
+  font-size: 0.9rem;
+`;
+
 
 /* Component */
 
@@ -405,45 +499,24 @@ const SummaryPage: React.FC = () => {
   //  gets the current view filter ("all", "expenses", or "incomes") from the URL
   const viewFilter = (searchParams.get('filter') as ViewFilter) || 'all';
 
-  // store the state for our category filter
-  const initialCategoryIds = searchParams.getAll('categories').map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>(initialCategoryIds);
+  //  read category filters directly from URL - single source of truth
+  const selectedCategoryIds = useMemo(() => {
+    return searchParams.getAll('categories').map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+  }, [searchParams]);
+
   const [selectedDropdownCategory, setSelectedDropdownCategory] = useState<number | ''>('');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+  
+  // Pagination state
+  const [itemsPerPage, setItemsPerPage] = useState<number>(10);
+  const [currentPage, setCurrentPage] = useState<number>(0);
+  const [inputValue, setInputValue] = useState<string>('10');
 
   //  fetches all the categories and category types from the server
   const { data: allCategories = [], isLoading: isLoadingCategories } = useAllCategories();
   const { data: categoryTypes = [] } = useCategoryTypes();
   //  finds the ID of the "standard" category type
   const standardTypeId = useMemo(() => categoryTypes.find(t => t.name === 'standard')?.id, [categoryTypes]);
-
-  //  special function from React that runs whenever the URL changes
-  // It makes sure that our selected category filters are in sync with the URL
-  useEffect(() => {
-    const urlCategoryIds = searchParams.getAll('categories').map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-    setSelectedCategoryIds(urlCategoryIds);
-  }, [searchParams]);
-
-  //  special function from React that runs whenever the selected category filters change
-  // It updates the URL to reflect the new filters
-  useEffect(() => {
-    const newSearchParams = new URLSearchParams(searchParams);
-    
-    //  remove the old category filters from the URL
-    newSearchParams.delete('categories');
-    
-    //  add the new category filters to the URL
-    selectedCategoryIds.forEach(id => newSearchParams.append('categories', id.toString()));
-    
-    //  only update the URL if the filters have actually changed
-    const currentCategoryParams = searchParams.getAll('categories').map(id => parseInt(id, 10)).filter(id => !isNaN(id));
-    const hasChanged = currentCategoryParams.length !== selectedCategoryIds.length ||
-                       !currentCategoryParams.every(id => selectedCategoryIds.includes(id));
-    
-    if (hasChanged) {
-      setSearchParams(newSearchParams, { replace: true });
-    }
-  }, [selectedCategoryIds, setSearchParams]);
 
   //  fetches the payment items from the server, based on the current filters
   const queryResult = usePaymentItems({
@@ -475,6 +548,19 @@ const SummaryPage: React.FC = () => {
     });
   }, [paymentDataForMemo, sortOrder]);
 
+  // Calculate pagination
+  const totalPages = Math.ceil(sorted.length / itemsPerPage);
+  const paginatedItems = useMemo(() => {
+    const startIndex = currentPage * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return sorted.slice(startIndex, endIndex);
+  }, [sorted, currentPage, itemsPerPage]);
+
+  // Reset to first page when filters change
+  useEffect(() => {
+    setCurrentPage(0);
+  }, [viewFilter, selectedCategoryIds, sortOrder]);
+
   //  calculates the total amount of all the payment items
   const total: number = useMemo(() => {
     return paymentDataForMemo.reduce(
@@ -491,23 +577,36 @@ const SummaryPage: React.FC = () => {
 
   /* Callbacks */
 
+  //  helper function to update category IDs in URL
+  const updateCategoryFilters = useCallback((categoryIds: number[]) => {
+    const newSearchParams = new URLSearchParams(searchParams);
+    
+    //  remove the old category filters from the URL
+    newSearchParams.delete('categories');
+    
+    //  add the new category filters to the URL
+    categoryIds.forEach(id => newSearchParams.append('categories', id.toString()));
+    
+    setSearchParams(newSearchParams, { replace: true });
+  }, [searchParams, setSearchParams]);
+
   // function for "Add Category" button
   const handleAddCategory = useCallback(() => {
     if (selectedDropdownCategory && !selectedCategoryIds.includes(selectedDropdownCategory as number)) {
-      setSelectedCategoryIds(prev => [...prev, selectedDropdownCategory as number]);
+      updateCategoryFilters([...selectedCategoryIds, selectedDropdownCategory as number]);
       setSelectedDropdownCategory('');
     }
-  }, [selectedDropdownCategory, selectedCategoryIds]);
+  }, [selectedDropdownCategory, selectedCategoryIds, updateCategoryFilters]);
 
   // function for the "x" on a category tag
   const handleRemoveCategory = useCallback((categoryId: number) => {
-    setSelectedCategoryIds(prev => prev.filter(id => id !== categoryId));
-  }, []);
+    updateCategoryFilters(selectedCategoryIds.filter(id => id !== categoryId));
+  }, [selectedCategoryIds, updateCategoryFilters]);
 
   //  function for the "Reset All" button
   const handleResetFilters = useCallback(() => {
-    setSelectedCategoryIds([]);
-  }, []);
+    updateCategoryFilters([]);
+  }, [updateCategoryFilters]);
 
   // function for the menu icon.
   const handleMenu = useCallback(() => {
@@ -519,6 +618,33 @@ const SummaryPage: React.FC = () => {
   const handleAdd = useCallback(() => {
     navigate('/add');
   }, [navigate]);
+
+  // Pagination handlers
+  const handleShowClick = useCallback(() => {
+    const value = parseInt(inputValue, 10);
+    if (!isNaN(value) && value > 0) {
+      setItemsPerPage(value);
+      setCurrentPage(0); // Reset to first page
+    }
+  }, [inputValue]);
+
+  const handlePreviousPage = useCallback(() => {
+    setCurrentPage(prev => Math.max(0, prev - 1));
+  }, []);
+
+  const handleNextPage = useCallback(() => {
+    setCurrentPage(prev => Math.min(totalPages - 1, prev + 1));
+  }, [totalPages]);
+
+  const handleInputKeyPress = useCallback((e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter') {
+      handleShowClick();
+    }
+  }, [handleShowClick]);
+
+  const handleAllClick = useCallback(() => {
+    setInputValue(sorted.length.toString());
+  }, [sorted.length]);
 
 
   /* Render */  
@@ -598,7 +724,7 @@ const SummaryPage: React.FC = () => {
         <p>Loading payment items…</p>
       ) : (
         <List>
-          {sorted.map(item => (
+          {paginatedItems.map(item => (
             <PaymentItemLine
               key={item.id}
               item={item}
@@ -616,6 +742,51 @@ const SummaryPage: React.FC = () => {
             </AmountContainer>
           </TotalEntry>
         </List>
+      )}
+
+      {/* Pagination Footer - Fixed at bottom */}
+      {!isLoading && sorted.length > 0 && (
+        <PaginationFooter>
+          <PaginationLeft>
+            <PaginationButton onClick={handleShowClick}>
+              Show
+            </PaginationButton>
+            <PaginationInput
+              type="number"
+              min="1"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleInputKeyPress}
+              onFocus={(e) => e.target.select()}
+              aria-label="Items per page"
+            />
+            <AllButton onClick={handleAllClick}>
+              ALL
+            </AllButton>
+          </PaginationLeft>
+
+          <PaginationRight>
+            <PageInfo>
+              Page {currentPage + 1} of {totalPages} ({sorted.length} total)
+            </PageInfo>
+            <PaginationButton
+              onClick={handlePreviousPage}
+              $disabled={currentPage === 0}
+              disabled={currentPage === 0}
+              aria-label="Previous page"
+            >
+              Previous
+            </PaginationButton>
+            <PaginationButton
+              onClick={handleNextPage}
+              $disabled={currentPage >= totalPages - 1}
+              disabled={currentPage >= totalPages - 1}
+              aria-label="Next page"
+            >
+              Next
+            </PaginationButton>
+          </PaginationRight>
+        </PaginationFooter>
       )}
     </>
   );
