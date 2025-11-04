@@ -27,6 +27,12 @@ import {
   useDeleteInvoice,
 } from '../api/hooks';
 import { ConfirmationDialog } from './ConfirmationDialog';
+import {
+  CATEGORY_NAME_MAX_LENGTH,
+  DESCRIPTION_MAX_LENGTH,
+  RECIPIENT_ADDRESS_MAX_LENGTH,
+  RECIPIENT_NAME_MAX_LENGTH,
+} from '../constants/textLimits';
 
 // styled components for customer-specified UI
 const FormContainer = styled.div`
@@ -1092,6 +1098,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
             placeholder="Describe what this payment is for..."
             value={paymentDescription}
             onChange={(e) => setPaymentDescription(e.target.value)}
+            maxLength={DESCRIPTION_MAX_LENGTH}
           />
         </FormField>
 
@@ -1143,6 +1150,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
                     }
                   }
                 }}
+                maxLength={RECIPIENT_NAME_MAX_LENGTH}
                 disabled={loadingRecipients}
               />
               {isRecipientDropdownOpen && (
@@ -1181,13 +1189,15 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
               placeholder="Name"
               value={recipientName}
               onChange={(e) => setRecipientName(e.target.value)}
+              maxLength={RECIPIENT_NAME_MAX_LENGTH}
             />
-            
+
             <RecipientInput
               type="text"
               placeholder="Address"
               value={recipientAddress}
               onChange={(e) => setRecipientAddress(e.target.value)}
+              maxLength={RECIPIENT_ADDRESS_MAX_LENGTH}
             />
             
             <AddRecipientButton
@@ -1236,6 +1246,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
                     }
                   }
                 }}
+                maxLength={CATEGORY_NAME_MAX_LENGTH}
                 disabled={loadingCategories}
               />
               {isCategoryDropdownOpen && (
@@ -1275,6 +1286,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
                 placeholder="Add new category"
                 value={newCategoryName}
                 onChange={(e) => setNewCategoryName(e.target.value)}
+                maxLength={CATEGORY_NAME_MAX_LENGTH}
               />
               <AddCategoryButton
                 type="button"

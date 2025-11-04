@@ -20,6 +20,26 @@ import { useNavigate } from 'react-router-dom';
 import { PaymentItem } from '../types';
 import { useImportCSV } from '../api/hooks';
 
+const CSV_HEADER_COLUMNS = [
+  'amount',
+  'date',
+  'description',
+  'Recipient name',
+  'Recipient address',
+  'standard_category name',
+  'periodic',
+];
+
+const escapeCsvField = (rawValue: string): string => {
+  const normalized = rawValue.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const shouldQuote = /[";\n]/.test(normalized);
+  let escaped = normalized.replace(/"/g, '""');
+  if (shouldQuote) {
+    escaped = `"${escaped}"`;
+  }
+  return escaped;
+};
+
 
 /* Types & Props  */
 
@@ -259,11 +279,20 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
         }
 
         // Format: amount;date;description;Recipient name;Recipient address;standard_category name;periodic
-        return [amount, date, description, recipientName, recipientAddress, standardCategoryName, periodic].join(';');
+        const rowValues = [
+          amount,
+          date,
+          description,
+          recipientName,
+          recipientAddress,
+          standardCategoryName,
+          periodic,
+        ];
+
+        return rowValues.map((value) => escapeCsvField(value ?? '')).join(';');
       }));
 
-      // add header row
-      const csvContent = 'amount;date;description;Recipient name;Recipient address;standard_category name;periodic\n' + csvRows.join('\n');
+      const csvContent = [CSV_HEADER_COLUMNS.join(';'), ...csvRows].join('\r\n');
 
       // create blob and trigger download
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
