@@ -25,6 +25,13 @@ from typing import List, Optional
 from sqlmodel import Field, SQLModel, Relationship
 from sqlalchemy.orm import Mapped
 
+from .constants import (
+    MAX_CATEGORY_NAME_LENGTH,
+    MAX_DESCRIPTION_LENGTH,
+    MAX_RECIPIENT_ADDRESS_LENGTH,
+    MAX_RECIPIENT_NAME_LENGTH,
+)
+
 
 # Association table (many-to-many) between PaymentItem and Category
 class PaymentItemCategoryLink(SQLModel, table=True):
@@ -55,8 +62,8 @@ class CategoryType(SQLModel, table=True):
         • *VAT Rate*        (19%, 7%, 0%)
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    description: Optional[str] = None
+    name: str = Field(max_length=MAX_CATEGORY_NAME_LENGTH)
+    description: Optional[str] = Field(default=None, max_length=MAX_DESCRIPTION_LENGTH)
 
 
 class Category(SQLModel, table=True):
@@ -68,7 +75,7 @@ class Category(SQLModel, table=True):
     back to the same column).
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
+    name: str = Field(max_length=MAX_CATEGORY_NAME_LENGTH)
 
     # Which type does this tag belong to?
     type_id: int = Field(foreign_key="categorytype.id")
@@ -101,8 +108,15 @@ class Recipient(SQLModel, table=True):
     • Attach future metadata (e.g. contact info, logo, IBAN)
     """
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
-    address: Optional[str] = None
+    name: str = Field(max_length=MAX_RECIPIENT_NAME_LENGTH)
+    address: Optional[str] = Field(default=None, max_length=MAX_RECIPIENT_ADDRESS_LENGTH)
+
+
+class RecipientUpdate(SQLModel):
+    """Schema for updating an existing recipient."""
+
+    name: Optional[str] = Field(default=None, max_length=MAX_RECIPIENT_NAME_LENGTH)
+    address: Optional[str] = Field(default=None, max_length=MAX_RECIPIENT_ADDRESS_LENGTH)
     
 
 
@@ -121,7 +135,9 @@ class PaymentItemBase(SQLModel):
     amount: float  # use DECIMAL in production to avoid rounding errors
     date: datetime  # changed from timestamp to date for frontend compatibility
     periodic: bool = False
-    description: Optional[str] = None  # description of what this payment is for
+    description: Optional[str] = Field(
+        default=None, max_length=MAX_DESCRIPTION_LENGTH
+    )  # description of what this payment is for
 
     # optional attachments (local path or S3 URL – persisted by upload endpoints)
     invoice_path: Optional[str] = None

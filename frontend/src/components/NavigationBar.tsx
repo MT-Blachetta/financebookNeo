@@ -18,6 +18,27 @@ import styled from 'styled-components';
 import clsx from 'clsx';
 import { useNavigate } from 'react-router-dom';
 import { PaymentItem } from '../types';
+import { useImportCSV } from '../api/hooks';
+
+const CSV_HEADER_COLUMNS = [
+  'amount',
+  'date',
+  'description',
+  'Recipient name',
+  'Recipient address',
+  'standard_category name',
+  'periodic',
+];
+
+const escapeCsvField = (rawValue: string): string => {
+  const normalized = rawValue.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  const shouldQuote = /[";\n]/.test(normalized);
+  let escaped = normalized.replace(/"/g, '""');
+  if (shouldQuote) {
+    escaped = `"${escaped}"`;
+  }
+  return escaped;
+};
 
 
 /* Types & Props  */
@@ -180,6 +201,11 @@ const CSVButtons = styled.div`
       color: var(--color-text-primary);
       border-color: #555;
     }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
   }
 
   @media (max-width: 640px) {
@@ -198,6 +224,8 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
   onAdd,
 }) => {
   const navigate = useNavigate();
+  const importCsvMutation = useImportCSV();
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleExportCSV = async () => {
     try {
@@ -251,11 +279,20 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
         }
 
         // Format: amount;date;description;Recipient name;Recipient address;standard_category name;periodic
-        return [amount, date, description, recipientName, recipientAddress, standardCategoryName, periodic].join(';');
+        const rowValues = [
+          amount,
+          date,
+          description,
+          recipientName,
+          recipientAddress,
+          standardCategoryName,
+          periodic,
+        ];
+
+        return rowValues.map((value) => escapeCsvField(value ?? '')).join(';');
       }));
 
-      // add header row
-      const csvContent = 'amount;date;description;Recipient name;Recipient address;standard_category name;periodic\n' + csvRows.join('\n');
+      const csvContent = [CSV_HEADER_COLUMNS.join(';'), ...csvRows].join('\r\n');
 
       // create blob and trigger download
       const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
@@ -271,6 +308,45 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
     } catch (error) {
       console.error('Error exporting CSV:', error);
       alert('Failed to export CSV. Please try again.');
+    }
+  };
+
+  const handleImportCSVClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    if (!file.name.toLowerCase().endsWith('.csv')) {
+      alert('Please select a CSV file that was exported from FinanceBook.');
+      event.target.value = '';
+      return;
+    }
+
+    try {
+      const result = await importCsvMutation.mutateAsync(file);
+      alert(
+        `CSV import completed. Created ${result.created_payments} payments, ${result.created_recipients} recipients, updated ${result.updated_recipients} recipients, and created ${result.created_categories} categories.`
+      );
+    } catch (error: unknown) {
+      console.error('Error importing CSV:', error);
+      let message = 'Failed to import CSV. Please ensure the file matches the exported format.';
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as { response?: { data?: { detail?: string } } };
+        const detail = axiosError.response?.data?.detail;
+        if (typeof detail === 'string' && detail.trim().length > 0) {
+          message = detail;
+        }
+      } else if (error instanceof Error && error.message) {
+        message = error.message;
+      }
+      alert(message);
+    } finally {
+      event.target.value = '';
     }
   };
 
@@ -307,8 +383,17 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
 
       <RightSection>
         <CSVButtons>
-          <button>import CSV</button>
-          <button onClick={handleExportCSV}>export CSV</button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,text/csv"
+            style={{ display: 'none' }}
+            onChange={handleImportFileChange}
+          />
+          <button type="button" onClick={handleImportCSVClick} disabled={importCsvMutation.isPending}>
+            {importCsvMutation.isPending ? 'importing…' : 'import CSV'}
+          </button>
+          <button type="button" onClick={handleExportCSV}>export CSV</button>
         </CSVButtons>
         {onAdd && <AddButton onClick={onAdd}>ADD</AddButton>}
         <MenuButton aria-label="Open Menu" onClick={onMenu}>

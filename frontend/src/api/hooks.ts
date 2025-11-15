@@ -378,6 +378,48 @@ export function useCreateRecipient() {
   });
 }
 
+export function useUpdateRecipient() {
+  const queryClient = useQueryClient();
+  return useMutation<Recipient, Error, { id: number } & Partial<Omit<Recipient, 'id'>>>({
+    mutationFn: async ({ id, ...updateData }) => {
+      const res = await api.put<Recipient>(`/recipients/${id}`, updateData);
+      return res.data;
+    },
+    onSuccess: (updatedRecipient: Recipient) => {
+      queryClient.invalidateQueries({ queryKey: ['recipients'] });
+      queryClient.invalidateQueries({ queryKey: ['recipient', updatedRecipient.id] });
+    },
+  });
+}
+
+export interface ImportCsvSummary {
+  created_payments: number;
+  created_recipients: number;
+  updated_recipients: number;
+  created_categories: number;
+}
+
+export function useImportCSV() {
+  const queryClient = useQueryClient();
+  return useMutation<ImportCsvSummary, Error, File>({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await api.post<ImportCsvSummary>('/import-csv', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      return res.data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['payment-items'] });
+      queryClient.invalidateQueries({ queryKey: ['recipients'] });
+      queryClient.invalidateQueries({ queryKey: ['all-categories'] });
+      queryClient.invalidateQueries({ queryKey: ['categories-by-type'], exact: false });
+      queryClient.invalidateQueries({ queryKey: ['category-tree'], exact: false });
+    },
+  });
+}
+
 /**
  * Fetch a single recipient by ID.
  * @param recipientId - ID of the recipient to fetch.
