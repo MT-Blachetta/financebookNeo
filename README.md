@@ -1,33 +1,44 @@
 # FinanceBook - Private Finance Management Application
 
-FinanceBook is a web application designed for managing private finances and cash flows. It features an Android-first (though currently web-focused) approach with a unified backend, state-of-the-art technologies, and a modern design, aiming to be a fully-fledged marketable product.
+FinanceBook is a web application designed for managing private finances and cash flows. It features a modern React frontend with a FastAPI backend, utilizing state-of-the-art technologies and a clean, professional design.
 
 ## Core Features (Current Implementation)
 
 *   **Payment Item Management**:
     *   Create, Read, Update, Delete (CRUD) operations for payment items.
-    *   Each item includes amount, date/time, periodicity, an optional recipient, multiple categories, and an optional attachment URL.
+    *   Each item includes amount, date/time, periodicity, an optional recipient, multiple categories, and optional invoice attachments.
     *   Items are classified as "Income" (positive amount) or "Expense" (negative amount).
+    *   Support for invoice file uploads (PDF, DOCX, DOC, JPEG, PNG, GIF, BMP, TIFF) with 25MB size limit.
+    *   Invoice files are automatically deleted when the associated payment item is deleted.
 *   **Category Management**:
     *   Define custom "Category Types" (e.g., "Spending Area", "Payment Method").
-    *   Create and edit nested categories under these types. Each category may
-        optionally have a PNG icon uploaded via the API.
-    *   A default `UNCLASSIFIED` category is created on first run so that every
-        payment item has at least one tag.
+    *   Create and edit nested categories under these types with unlimited depth.
+    *   Each category may optionally have an icon (PNG, JPEG, GIF, BMP, SVG) uploaded via the API.
+    *   A default `UNCLASSIFIED` category under the "standard" type is created on first run.
+    *   Support for one category per type per payment item (enforced validation).
+    *   Hierarchical category filtering with automatic descendant expansion.
 *   **Recipient Management**:
-    *   Create and list recipients (persons or organizations).
-*   **Filtering**:
-    *   Filter payment items on the summary page by "All", "Incomes", or "Expenses".
-    *   Filter by one or more categories. The backend expands selected
-        categories to include all of their descendants so parent selections work
-        intuitively.
+    *   Create, read, update recipients (persons or organizations).
+    *   Each recipient has a name and optional address field.
+    *   Name normalization and uniqueness validation.
+*   **Filtering & Pagination**:
+    *   Filter payment items by "All", "Incomes", or "Expenses".
+    *   Filter by one or more categories with OR logic (items matching ANY selected category).
+    *   The backend automatically expands selected categories to include all descendants.
+    *   Pagination controls with customizable items per page.
+    *   "Show All" functionality to display all items at once.
+*   **Data Import/Export**:
+    *   CSV import functionality for bulk data import.
+    *   Automatic creation of recipients and categories during import.
+    *   Validation of CSV format, data types, and field lengths.
 *   **User Interface**:
-    *   A summary page listing all payment items, sorted by date, with a running
-        total and optional category filters.
-    *   Forms for adding and editing payment items. Successful creation leads to
-        a short confirmation page.
-    *   Pages for managing category types **and** the category tree itself.
+    *   Summary page listing all payment items, sorted by date, with running totals and category filters.
+    *   Forms for adding and editing payment items with recipient and category selection.
+    *   Success confirmation page after creating new items.
+    *   Category type and category tree management pages.
     *   Navigation drawer for accessing different sections.
+    *   Footer with pagination controls (Previous/Next, custom page size, Show All).
+    *   Responsive design with dark theme.
 
 ## Project Structure
 
@@ -35,45 +46,59 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
 
 ### Backend (`/app` directory)
 
-*   **`main.py`**: Contains all FastAPI routes for payment items, categories,
-    category types, and recipients.  Notable endpoints include:
-    *   `POST /payment-items` – create a payment record.
-    *   `GET /payment-items` – list items with optional income/expense and
-        category filters.
-    *   `POST /uploadicon/` and `GET /download_static/{filename}` – upload and
-        retrieve PNG icons for categories.
-    *   `GET /categories/{id}/descendants` – fetch the full subtree of a
-        category.
-    *   `GET /categories/by-type/{type_id}` – list categories belonging to a
-        specific category type.
-    The module handles HTTP requests, data validation and interaction with the
-    database via SQLModel.
-*   **`models.py`**: Defines the data structures (SQLModel classes) for `PaymentItem`, `Category`, `CategoryType`, `Recipient`, and the association table `PaymentItemCategoryLink`. These models map directly to database tables and are used for request/response validation.
-*   **`database.py`**: Manages database connection (PostgreSQL) and table creation using SQLModel.
+*   **`main.py`**: Contains all FastAPI routes and business logic:
+    *   **Payment Items**: `POST /payment-items`, `GET /payment-items`, `GET /payment-items/{item_id}`, `PUT /payment-items/{item_id}`, `DELETE /payment-items/{item_id}`
+    *   **Categories**: `POST /categories`, `GET /categories`, `GET /categories/{category_id}`, `PUT /categories/{category_id}`, `GET /categories/{category_id}/tree`, `GET /categories/{category_id}/descendants`, `GET /categories/by-type/{type_id}`
+    *   **Category Types**: `POST /category-types`, `GET /category-types`
+    *   **Recipients**: `POST /recipients`, `GET /recipients`, `GET /recipients/{recipient_id}`, `PUT /recipients/{recipient_id}`
+    *   **File Uploads**: `POST /uploadicon/`, `GET /download_static/{filename}`, `POST /upload-invoice/{payment_item_id}`, `GET /download-invoice/{payment_item_id}`, `DELETE /invoice/{payment_item_id}`
+    *   **Data Import**: `POST /import-csv`
+    *   Includes comprehensive logging, validation, and error handling.
+    *   Automatic initialization of default data (standard category type and UNCLASSIFIED category).
+*   **`models.py`**: Defines SQLModel classes for database tables and API schemas:
+    *   `PaymentItem`, `PaymentItemCreate`, `PaymentItemRead`, `PaymentItemUpdate`
+    *   `Category`, `CategoryUpdate`, `CategoryType`
+    *   `Recipient`, `RecipientUpdate`
+    *   `PaymentItemCategoryLink` (many-to-many association table)
+    *   Includes comprehensive documentation and type hints.
+*   **`database.py`**: Manages PostgreSQL database connection and table creation using SQLModel.
+*   **`constants.py`**: Application-wide constants for validation (max lengths for text fields).
 *   **`.env`**: Environment configuration file containing the DATABASE_URL for PostgreSQL connection.
+*   **`/invoices`**: Directory for storing uploaded invoice files (auto-created).
 
 ### Frontend (`/frontend` directory)
 
-*   **`src/`**: Contains all the React application source code.
-    *   **`main.tsx`**: Entry point of the React application, sets up React Query and React Router.
-    *   **`App.tsx`**: Root component defining global layout, routes, and the main navigation drawer.
-    *   **`api/hooks.ts`**: Custom React Query hooks (`useQuery`, `useMutation`) for interacting with the backend API. Provides a clean abstraction for data fetching and state management related to API calls.
-    *   **`components/`**: Reusable UI components.
+*   **`src/`**: Contains all React application source code.
+    *   **`main.tsx`**: Entry point setting up React Query and React Router.
+    *   **`App.tsx`**: Root component defining global layout, routes, and navigation.
+    *   **`api/hooks.ts`**: Custom React Query hooks for API interactions with automatic caching and refetching.
+    *   **`components/`**: Reusable UI components:
         *   **`NavigationBar.tsx`**: Top navigation bar with filtering options and menu trigger.
-        *   **`PaymentItemForm.tsx`**: Form used for creating and editing payment items, including recipient and category selection, and attachment input.
-    *   **`pages/`**: Components representing different views/pages of the application.
-        *   **`SummaryPage.tsx`**: Displays the list of payment items, totals and filtering options.
-        *   **`AddItemPage.tsx`** / **`AddSuccessPage.tsx`**: Create a new payment and show a confirmation screen.
-        *   **`EditItemPage.tsx`**: Edit an existing payment item.
+        *   **`Footer.tsx`**: Bottom pagination controls with page navigation and items-per-page selector.
+        *   **`PaymentItemForm.tsx`**: Form for creating and editing payment items.
+        *   **`ConfirmationDialog.tsx`**: Reusable confirmation dialog component.
+    *   **`pages/`**: Page components:
+        *   **`SummaryPage.tsx`**: Main page displaying payment items with filtering and pagination.
+        *   **`AddItemPage.tsx`** / **`AddSuccessPage.tsx`**: Create new payment items and show confirmation.
+        *   **`EditItemPage.tsx`**: Edit existing payment items.
         *   **`CategoryManagerPage.tsx`**: Manage category types.
         *   **`CategoryEditPage.tsx`**: Full CRUD interface for categories including icon upload.
         *   **`NotFoundPage.tsx`**: 404 error page.
-    *   **`types.ts`**: TypeScript interfaces defining the shape of data objects (e.g., `PaymentItem`, `Category`) shared across the frontend, mirroring backend models.
+    *   **`types.ts`**: TypeScript interfaces mirroring backend models.
+    *   **`constants/textLimits.ts`**: Frontend validation constants matching backend limits.
     *   **`styles/globalStyle.ts`**: Global CSS styles and theme variables.
-    *   **`assets/`**: Static assets like SVG icons for UI elements.
-    *   **`../icons/`**: Directory containing category icons (PNG/SVG) that can be uploaded and used for categories.
-*   **`package.json`**: Defines project metadata, scripts (dev, build, preview), and dependencies.
-*   **`vite.config.ts`**: Configuration for Vite, the frontend build tool. Includes proxy setup for API requests to the backend.
+    *   **`assets/`**: Static assets (SVG icons for UI elements).
+*   **`package.json`**: Project metadata, scripts, and dependencies including React 18, React Router, React Query, Styled Components, Axios, and date-fns.
+*   **`vite.config.ts`**: Vite configuration with proxy setup for API requests.
+*   **`tsconfig.json`**: TypeScript compiler configuration.
+
+### Additional Files
+
+*   **`icons/`**: Directory for storing category icon files (auto-created).
+*   **`Dockerfile`**: Docker configuration for PostgreSQL database.
+*   **`run_app.sh`**: Automated setup and execution script.
+*   **`requirements.txt`**: Python dependencies including FastAPI, Uvicorn, SQLModel, psycopg2-binary, and python-multipart.
+
 ## System Requirements
 
 Before running the application, ensure you have the following software installed:
@@ -105,15 +130,9 @@ The script will:
 
 If you prefer to set up the application manually, follow these detailed instructions:
 
-*   **`tsconfig.json`**: TypeScript compiler configuration.
-
-## Running the Application
-
-
-
 ### 1. Backend (FastAPI)
 
-Navigate to the project root directory (`financebook01`).
+Navigate to the project root directory.
 
 **Setup:**
 
@@ -134,14 +153,11 @@ Navigate to the project root directory (`financebook01`).
     pip install --upgrade pip setuptools wheel
     pip install -r requirements.txt
     ```
-    The `requirements.txt` file includes `fastapi`, `uvicorn`, `sqlmodel`, `psycopg2-binary`, etc.
-    If you get a "uvicorn: command not found" error, ensure the virtual environment is activated
-    and the dependencies were installed correctly.
 
 **Create Docker image and start the PostgreSQL docker container:**
 ```bash
 sudo docker build -t financebook-postgres .
-sudo docker run -d --name financebook-db -p 5432:5432 -v postgres_data:/home/$USERNAME/financebook/database financebook-postgres
+sudo docker run -d --name financebook-db -p 5432:5432 -v postgres_data:/var/lib/postgresql/data financebook-postgres
 ```
 The Docker container uses the credentials defined in the Dockerfile (user: `yourself`, password: `secretPassword`, database: `financebook`).
 
@@ -155,11 +171,7 @@ The backend API will be available at `http://localhost:8000`. You can access the
 
 ### 2. Frontend (React with Vite)
 
-Navigate to the `frontend` directory (`financebook01/frontend`).
-
-**Requirements:**
-- Node.js (version 18 or higher recommended)
-- npm or yarn package manager
+Navigate to the `frontend` directory.
 
 **Setup:**
 
@@ -168,55 +180,83 @@ Navigate to the `frontend` directory (`financebook01/frontend`).
     cd frontend
     npm install
     ```
-    or if you prefer yarn:
-    ```bash
-    cd frontend
-    yarn install
-    ```
 
 **Running the frontend development server:**
 
 ```bash
 npm run dev
 ```
-or
-```bash
-yarn dev
-```
-The frontend application will be available at `http://localhost:5173` (or another port if 5173 is busy). API requests from the frontend are proxied to the backend at `http://localhost:8000/api` as configured in `vite.config.ts`.
+The frontend application will be available at `http://localhost:5173`. API requests from the frontend are proxied to the backend at `http://localhost:8000/api` as configured in `vite.config.ts`.
 
 ## Code Explanation & How it Works
 
 ### Backend Logic
 
-*   **Data Models (`models.py`)**: SQLModel is used to define Python classes that are simultaneously Pydantic models (for data validation and serialization) and SQLAlchemy models (for database interaction). Relationships like one-to-many (e.g., `Recipient` to `PaymentItem`) and many-to-many (e.g., `PaymentItem` to `Category` via `PaymentItemCategoryLink`) are defined here.
-*   **API Endpoints (`main.py`)**: FastAPI uses these models to automatically validate request bodies and serialize responses. Each endpoint function typically:
-    1.  Receives a database `Session` via dependency injection (`Depends(get_session)`).
-    2.  Takes Pydantic models as request bodies (e.g., `item: PaymentItem` in `create_payment_item`).
-    3.  Uses SQLModel's query interface (e.g., `select(PaymentItem)`) to interact with the database.
-    4.  Commits changes (`session.commit()`) and refreshes objects (`session.refresh()`) to get updated state from the DB.
-    5.  Returns the SQLModel objects, which FastAPI automatically converts to JSON.
-*   **Database (`database.py`)**: A PostgreSQL database is used via Docker. The `create_db_and_tables()` function initializes the schema if the database tables don't exist.
+*   **Data Models (`models.py`)**: SQLModel combines Pydantic (validation/serialization) and SQLAlchemy (database ORM). Relationships include:
+    *   One-to-many: `Recipient` → `PaymentItem`, `CategoryType` → `Category`
+    *   Many-to-many: `PaymentItem` ↔ `Category` via `PaymentItemCategoryLink`
+    *   Self-referencing: `Category.parent_id` for hierarchical categories
+*   **API Endpoints (`main.py`)**: FastAPI automatically validates request bodies and serializes responses using the SQLModel classes. Each endpoint:
+    1.  Receives a database `Session` via dependency injection.
+    2.  Validates input data using Pydantic models.
+    3.  Uses SQLModel's query interface for database operations.
+    4.  Commits changes and returns updated objects as JSON.
+*   **Validation & Normalization**: Names are normalized (whitespace collapsed), uniqueness is enforced, and field lengths are validated against constants.
+*   **File Management**: Uploaded files (icons and invoices) are stored in dedicated directories with unique filenames. Files are automatically deleted when associated records are removed.
+*   **Category Filtering**: When filtering by categories, the backend automatically expands the selection to include all descendant categories, making parent category selection intuitive.
 
 ### Frontend Logic
 
-*   **State Management (React Query)**: API state (data fetched from the server, loading/error states, mutations) is managed by TanStack React Query (`@tanstack/react-query`). Custom hooks in `api/hooks.ts` wrap `useQuery` (for fetching data) and `useMutation` (for creating, updating, deleting data). This provides caching, automatic refetching, and a clean way to handle server state.
-*   **Routing (React Router)**: `react-router-dom` is used for client-side routing. Routes are defined in `App.tsx`, mapping URL paths to page components. `useNavigate` is used for programmatic navigation, and `useParams` for accessing URL parameters (e.g., item ID for editing). `useSearchParams` is used for managing filters in URL query strings.
-*   **Component Structure**:
-    *   **Pages (`pages/`)**: Top-level components for different views. They often fetch data using API hooks and pass it down to presentational components.
-    *   **Reusable Components (`components/`)**: Smaller, often presentational, components like forms, navigation bars, etc.
-    *   **Styling (Styled Components)**: `styled-components` is used for CSS-in-JS, allowing component-scoped styles and dynamic styling based on props. Global styles are in `styles/globalStyle.ts`.
-*   **Type Safety (TypeScript)**: The entire frontend is written in TypeScript. Interfaces in `types.ts` define the structure of data exchanged with the backend, ensuring type safety throughout the application.
-*   **Build Process (Vite)**: Vite provides a fast development server with Hot Module Replacement (HMR) and an optimized build process for production. The `vite.config.ts` includes a proxy to forward `/api` requests from the frontend dev server to the backend API server, avoiding CORS issues during development.
+*   **State Management (React Query)**: TanStack React Query manages server state with automatic caching, background refetching, and optimistic updates. Custom hooks in `api/hooks.ts` provide a clean API abstraction.
+*   **Routing (React Router)**: Client-side routing with `react-router-dom`. Routes defined in `App.tsx` map URLs to page components. `useNavigate` for programmatic navigation, `useParams` for URL parameters, `useSearchParams` for query strings.
+*   **Component Architecture**:
+    *   **Pages**: Top-level components that fetch data and manage page-specific state.
+    *   **Components**: Reusable UI elements with props-based configuration.
+    *   **Context**: `PaginationContext` in `SummaryPage.tsx` provides pagination state to the `Footer` component.
+*   **Styling (Styled Components)**: CSS-in-JS with component-scoped styles and dynamic styling based on props. Global styles and theme variables in `styles/globalStyle.ts`.
+*   **Type Safety (TypeScript)**: Full TypeScript coverage with interfaces in `types.ts` matching backend models, ensuring type safety across the application.
+*   **Build Process (Vite)**: Fast development server with Hot Module Replacement (HMR) and optimized production builds. Proxy configuration forwards `/api` requests to the backend.
+
+## Key Features Explained
+
+### Invoice Management
+- Upload invoices (PDF, images, documents) up to 25MB per payment item
+- Automatic file cleanup when payment items are deleted
+- Download invoices via dedicated endpoint
+- Delete invoices independently of payment items
+
+### Category System
+- Hierarchical categories with unlimited nesting depth
+- Multiple category types (e.g., "standard", custom types)
+- One category per type per payment item (enforced)
+- Icon support for visual identification
+- Automatic descendant expansion in filters
+
+### Pagination
+- Customizable items per page
+- "Show All" functionality
+- Page navigation (Previous/Next)
+- Real-time page count updates
+- Persistent across filter changes
+
+### Data Import
+- CSV import with automatic entity creation
+- Validation of data types and field lengths
+- Deduplication of recipients and categories
+- Batch processing with transaction safety
 
 ## Further Development & TODOs
 
-*   **Category Tree Visualisation**: The current editor is functional but could
-    benefit from a more intuitive drag-and-drop tree view.
-*   **User Authentication & Authorization**: Secure the application.
-*   **Advanced Reporting & Visualization**: Add charts and reports for financial
-    analysis.
-*   **Testing**: Implement unit and integration tests for both backend and
-    frontend.
-*   **Deployment**: Document deployment procedures for production environments.
+*   **Category Tree Visualization**: Implement drag-and-drop tree view for intuitive category management.
+*   **User Authentication & Authorization**: Add user accounts and secure the application.
+*   **Advanced Reporting & Visualization**: Add charts, graphs, and financial reports.
+*   **Export Functionality**: Add CSV/Excel export for payment items.
+*   **Testing**: Implement comprehensive unit and integration tests for both backend and frontend.
+*   **Deployment**: Document production deployment procedures (Docker Compose, cloud platforms).
 *   **UI/UX Polish**: Continue refining the user interface and experience.
+*   **Mobile Optimization**: Enhance mobile responsiveness and consider native mobile app.
+*   **Recurring Payments**: Implement scheduled job system for periodic payment items.
+*   **Multi-currency Support**: Add currency conversion and multi-currency tracking.
+*   **Budget Planning**: Add budget creation and tracking features.
+*   **Search Functionality**: Implement full-text search across payment items.
+
