@@ -6,10 +6,19 @@ FinanceBook is a web application designed for managing private finances and cash
 
 *   **Payment Item Management**:
     *   Create, Read, Update, Delete (CRUD) operations for payment items.
-    *   Each item includes amount, date/time, periodicity, an optional recipient, multiple categories, and optional invoice attachments.
+    *   Each item includes amount, date/time, periodicity flag, an optional recipient, multiple categories, and optional invoice attachments.
     *   Items are classified as "Income" (positive amount) or "Expense" (negative amount).
+    *   **Periodic payment indicator**: Items marked as periodic display a blue circular-arrow icon inline next to the date label for quick visual identification.
     *   Support for invoice file uploads (PDF, DOCX, DOC, JPEG, PNG, GIF, BMP, TIFF) with 25MB size limit.
     *   Invoice files are automatically deleted when the associated payment item is deleted.
+    *   Invoice download link positioned at the top-right corner of each payment item card.
+*   **Statistics & Charts**:
+    *   Dedicated `/statistics` page accessible via the navigation bar.
+    *   **Account Balance Over Time**: Area/line chart showing the running cumulative balance with date-based X-axis and euro-formatted Y-axis (full number notation with dot separators, e.g. "3.300 €").
+    *   **Income Distribution by Category**: Donut pie chart (green palette) showing income breakdown by assigned categories.
+    *   **Expense Distribution by Category**: Donut pie chart (red palette) showing expense breakdown by assigned categories.
+    *   Categories are resolved via `standard_category_id` lookup against the full category tree.
+    *   Built with Recharts, a composable React charting library.
 *   **Category Management**:
     *   Define custom "Category Types" (e.g., "Spending Area", "Payment Method").
     *   Create and edit nested categories under these types with unlimited depth.
@@ -25,10 +34,11 @@ FinanceBook is a web application designed for managing private finances and cash
     *   Filter payment items by "All", "Incomes", or "Expenses".
     *   Filter by one or more categories with OR logic (items matching ANY selected category).
     *   The backend automatically expands selected categories to include all descendants.
-    *   Pagination controls with customizable items per page.
-    *   "Show All" functionality to display all items at once.
+    *   Single-row pagination bar anchored to the bottom of the viewport with custom blue arrow icons for Previous/Next navigation.
+    *   Customizable items per page and "Show All" functionality.
 *   **Data Import/Export**:
     *   CSV import functionality for bulk data import.
+    *   CSV export to download all payment data.
     *   Automatic creation of recipients and categories during import.
     *   Validation of CSV format, data types, and field lengths.
 *   **User Interface**:
@@ -36,9 +46,9 @@ FinanceBook is a web application designed for managing private finances and cash
     *   Forms for adding and editing payment items with recipient and category selection.
     *   Success confirmation page after creating new items.
     *   Category type and category tree management pages.
-    *   Navigation drawer for accessing different sections.
-    *   Footer with pagination controls (Previous/Next, custom page size, Show All).
+    *   Navigation bar with quick links to Categories, Category Types, and Statistics.
     *   Responsive design with dark theme.
+    *   Modern card-based payment item layout with category icons, recipient details, and inline periodic indicators.
 
 ## Project Structure
 
@@ -79,6 +89,7 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
         *   **`ConfirmationDialog.tsx`**: Reusable confirmation dialog component.
     *   **`pages/`**: Page components:
         *   **`SummaryPage.tsx`**: Main page displaying payment items with filtering and pagination.
+        *   **`StatisticsPage.tsx`**: Financial charts page with balance-over-time area chart and income/expense pie charts.
         *   **`AddItemPage.tsx`** / **`AddSuccessPage.tsx`**: Create new payment items and show confirmation.
         *   **`EditItemPage.tsx`**: Edit existing payment items.
         *   **`CategoryManagerPage.tsx`**: Manage category types.
@@ -87,8 +98,8 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
     *   **`types.ts`**: TypeScript interfaces mirroring backend models.
     *   **`constants/textLimits.ts`**: Frontend validation constants matching backend limits.
     *   **`styles/globalStyle.ts`**: Global CSS styles and theme variables.
-    *   **`assets/`**: Static assets (SVG icons for UI elements).
-*   **`package.json`**: Project metadata, scripts, and dependencies including React 18, React Router, React Query, Styled Components, Axios, and date-fns.
+    *   **`assets/`**: Static assets (SVG icons for pagination arrows, sort indicators, and periodic payment indicator).
+*   **`package.json`**: Project metadata, scripts, and dependencies including React 18, React Router, React Query, Styled Components, Recharts, Axios, and date-fns.
 *   **`vite.config.ts`**: Vite configuration with proxy setup for API requests.
 *   **`tsconfig.json`**: TypeScript compiler configuration.
 
@@ -225,6 +236,15 @@ The frontend application will be available at `http://localhost:5173`. API reque
 - Download invoices via dedicated endpoint
 - Delete invoices independently of payment items
 
+### Statistics & Charts
+- **Balance Over Time**: Running cumulative balance plotted as an area chart with gradient fill
+- **Income Pie Chart**: Donut chart showing income distribution by category (green palette)
+- **Expense Pie Chart**: Donut chart showing expense distribution by category (red palette)
+- Category names resolved via `standard_category_id` lookup against the full category tree
+- Y-axis uses full number notation with German-style dot separators (e.g., "3.300 €")
+- Custom tooltips showing exact amounts in euros
+- Responsive layout: pie charts stack vertically on narrow screens
+
 ### Category System
 - Hierarchical categories with unlimited nesting depth
 - Multiple category types (e.g., "standard", custom types)
@@ -232,15 +252,20 @@ The frontend application will be available at `http://localhost:5173`. API reque
 - Icon support for visual identification
 - Automatic descendant expansion in filters
 
+### Periodic Payment Indicator
+- Payment items marked as periodic display a blue circular-arrow icon next to their date
+- Provides quick visual identification of recurring payments in the summary list
+
 ### Pagination
-- Customizable items per page
-- "Show All" functionality
-- Page navigation (Previous/Next)
+- Single-row bar anchored to the bottom of the viewport
+- Custom blue arrow icons for Previous/Next navigation
+- Customizable items per page and "Show All" functionality
 - Real-time page count updates
 - Persistent across filter changes
 
-### Data Import
+### Data Import/Export
 - CSV import with automatic entity creation
+- CSV export to download all payment data
 - Validation of data types and field lengths
 - Deduplication of recipients and categories
 - Batch processing with transaction safety

@@ -24,6 +24,7 @@ import UpIcon from '../assets/up.svg';
 import DownIcon from '../assets/down.svg';
 import ArrowLeftIcon from '../assets/arrow-left.svg';
 import ArrowRightIcon from '../assets/arrow-right.svg';
+import PeriodicIcon from '../assets/periodic-icon.svg';
 
 // import the type for the view filter
 import { ViewFilter } from '../components/NavigationBar';
@@ -278,7 +279,9 @@ const DateText = styled.span`
   font-size: 0.9rem; //  sets the font size.
   color: var(--color-text-secondary); //  sets the text color.
   margin-bottom: var(--spacing-sm); //  adds some space below the date.
-  display: block; //  makes the date take up its own line.
+  display: flex; //  keeps date text and periodic icon on the same row.
+  align-items: center;
+  gap: 0.35rem;
 `;
 
 //  container for the recipient information
@@ -344,6 +347,15 @@ const DownloadLink = styled.a`
     text-decoration: underline; //  adds an underline on hover.
     color:rgb(0, 123, 255); //  makes the color darker on hover.
   }
+`;
+
+// Inline icon for periodic/recurring payments — shown after date text
+const PeriodicInlineIcon = styled.img`
+  width: 16px;
+  height: 16px;
+  margin-left: 0.4rem;
+  vertical-align: middle;
+  opacity: 0.85;
 `;
 
 //  text for the amount
@@ -911,6 +923,8 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
         </DownloadLink>
       )}
 
+
+
       <ImageHolder>
         {iconUrl ? (
           <img src={iconUrl} alt="Category icon" />
@@ -923,7 +937,10 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
       <ContentWrapper>
         <MetaInfo>
           {/* Date is above the amount (in its own block) */}
-          <DateText>{format(parseISO(item.date), 'PPP, HH:mm')}</DateText>
+          <DateText>
+            {format(parseISO(item.date), 'PPP, HH:mm')}
+            {item.periodic && <PeriodicInlineIcon src={PeriodicIcon} alt="Periodic" title="Periodic payment" />}
+          </DateText>
 
           {/* Payment description */}
           {item.description && (
