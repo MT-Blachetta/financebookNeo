@@ -28,6 +28,7 @@ const AddSuccessPage = lazy(() => import('./pages/AddSuccessPage')); // success 
 const EditItemPage = lazy(() => import('./pages/EditItemPage')); // page for editing existing payment items
 const CategoryManagerPage = lazy(() => import('./pages/CategoryManagerPage')); // page for managing category types
 const CategoryEditPage = lazy(() => import('./pages/CategoryEditPage')); // page for managing categories
+const StatisticsPage = lazy(() => import('./pages/StatisticsPage')); // statistics & charts page
 
 
 // Layout
@@ -159,6 +160,7 @@ const App: React.FC = () => {
             {/* Route for managing categories */}
             <Route path="/categories" element={<CategoryEditPage />} />
             <Route path="/category-types" element={<CategoryManagerPage />} />
+            <Route path="/statistics" element={<StatisticsPage />} />
 
             {/* Fallback routes for 404 and unmatched paths */}
             <Route path="/404" element={<NotFoundPage />} />

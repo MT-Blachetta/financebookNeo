@@ -357,6 +357,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
         <CategoryEditButtons>
           <button onClick={() => navigate('/categories')}>Categories</button>
           <button onClick={() => navigate('/category-types')}>Category Types</button>
+          <button onClick={() => navigate('/statistics')}>Statistics</button>
         </CategoryEditButtons>
       </LeftSection>
 
