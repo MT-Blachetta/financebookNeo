@@ -42,11 +42,12 @@ const Wrapper = styled.div`
 
 const Content = styled.main`
   flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
   width: 100%;
   max-width: 48rem; /* keep readable line-length on desktop */
   margin-inline: auto;
   padding: 1rem;
-  padding-bottom: 80px; /* Add padding to prevent content from being hidden behind fixed pagination footer */
   color: #eaeaea; /* light grey text for contrast on black */
 `;
 
@@ -56,7 +57,7 @@ const Content = styled.main`
 const App: React.FC = () => {
   const navigate = useNavigate();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
-  
+
   // get current filter from URL to show active state in navigation
   const [searchParams] = useSearchParams();
   const currentFilter = (searchParams.get('filter') as ViewFilter) || 'all';
@@ -70,14 +71,14 @@ const App: React.FC = () => {
   const handleGlobalNavFilterChange = (filter: ViewFilter) => {
     // Preserve existing category filters from current URL
     const newSearchParams = new URLSearchParams(searchParams);
-    
+
     // Update or remove the filter parameter
     if (filter === 'all') {
       newSearchParams.delete('filter');
     } else {
       newSearchParams.set('filter', filter);
     }
-    
+
     // Navigate with preserved parameters
     const queryString = newSearchParams.toString();
     navigate(queryString ? `/?${queryString}` : '/');
@@ -143,22 +144,22 @@ const App: React.FC = () => {
       />
       <NavigationDrawer />
 
-      <Content onClick={() => { if (isDrawerOpen) setIsDrawerOpen(false);}}> {/* Close drawer on content click */}
+      <Content onClick={() => { if (isDrawerOpen) setIsDrawerOpen(false); }}> {/* Close drawer on content click */}
         <Suspense fallback={<p>Loading page content…</p>}> {/* Fallback UI during lazy load */}
           <Routes>
             {/* Main route for the payment summary */}
             <Route path="/" element={<SummaryPage />} />
-            
+
             {/* Routes for creating and editing payment items */}
             <Route path="/add" element={<AddItemPage />} />
             <Route path="/add-success" element={<AddSuccessPage />} />
             <Route path="/payment/new" element={<AddItemPage />} />
             <Route path="/payment/:id/edit" element={<EditItemPage />} />
-            
+
             {/* Route for managing categories */}
             <Route path="/categories" element={<CategoryEditPage />} />
             <Route path="/category-types" element={<CategoryManagerPage />} />
-            
+
             {/* Fallback routes for 404 and unmatched paths */}
             <Route path="/404" element={<NotFoundPage />} />
             <Route path="*" element={<Navigate to="/404" replace />} /> {/* Redirect any unmatched path to 404 */}

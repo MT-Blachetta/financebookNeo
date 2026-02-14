@@ -22,6 +22,8 @@ import { format, parseISO } from 'date-fns';
 // import the SVG icons from the assets folder
 import UpIcon from '../assets/up.svg';
 import DownIcon from '../assets/down.svg';
+import ArrowLeftIcon from '../assets/arrow-left.svg';
+import ArrowRightIcon from '../assets/arrow-right.svg';
 
 // import the type for the view filter
 import { ViewFilter } from '../components/NavigationBar';
@@ -368,78 +370,115 @@ const TotalLabel = styled.div`
     font-size: 1.2rem; //  sets the font size.
 `;
 
-// Footer-style pagination container - fixed at bottom
-const PaginationFooter = styled.div`
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: #1a1a1a;
-  border-top: 1px solid #333;
-  padding: 0.75rem 1rem;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  z-index: 100;
-  min-height: 60px;
-`;
-
-// Left side controls (show button + input + ALL button)
-const PaginationLeft = styled.div`
+// Inline pagination bar — stretches full viewport width like the NavigationBar
+const PaginationSection = styled.section`
+  margin-top: auto;
+  margin-bottom: 0;
+  background: var(--color-surface);
+  border-top: 1px solid #272727;
+  border-bottom: 1px solid #272727;
+  padding: 0.5rem var(--spacing-md);
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+
+  /* Break out of the Content max-width container to span full viewport */
+  width: 100vw;
+  margin-left: calc(-50vw + 50%);
+  box-sizing: border-box;
 `;
 
-// Right side controls (page info + previous/next buttons)
-const PaginationRight = styled.div`
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-`;
-
-// Pagination button styling
-const PaginationButton = styled.button<{ $disabled?: boolean }>`
-  background: ${({ $disabled }) => ($disabled ? '#555' : '#007bff')};
-  color: ${({ $disabled }) => ($disabled ? '#888' : 'white')};
+// Arrow navigation button (icon-only)
+const ArrowButton = styled.button<{ $disabled?: boolean }>`
+  background: none;
   border: none;
-  padding: 0.5rem 1rem;
-  border-radius: var(--radius-md);
-  font-size: 0.9rem;
+  padding: 0.25rem;
+  margin: 0 0.5rem;
   cursor: ${({ $disabled }) => ($disabled ? 'not-allowed' : 'pointer')};
-  transition: background-color 0.2s ease;
+  opacity: ${({ $disabled }) => ($disabled ? '0.25' : '1')};
+  transition: opacity 0.2s ease, transform 0.15s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
 
-  &:hover {
-    background: ${({ $disabled}) => ($disabled ? '#555' : '#0056b3')};
+  img {
+    width: 44px;
+    height: 44px;
+  }
+
+  &:hover:not(:disabled) {
+    opacity: 0.8;
+    transform: scale(1.15);
   }
 `;
 
-// ALL button styling (black button)
-const AllButton = styled.button`
-  background: #000;
+// Center group of controls between the arrows
+const PaginationCenter = styled.div`
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+`;
+
+// Label text in the pagination
+const PaginationLabel = styled.span`
+  color: #888;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 500;
+`;
+
+// Action button (Apply)
+const PaginationActionButton = styled.button`
+  background: #007bff;
   color: white;
   border: none;
-  padding: 0.5rem 1rem;
+  padding: 0.4rem 0.85rem;
   border-radius: var(--radius-md);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
   cursor: pointer;
   transition: background-color 0.2s ease;
 
   &:hover {
+    background: #0056b3;
+  }
+`;
+
+// Show All button
+const PaginationAllButton = styled.button`
+  background: transparent;
+  color: #aaa;
+  border: 1px solid #444;
+  padding: 0.4rem 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+
+  &:hover {
     background: #333;
+    color: #eaeaea;
+    border-color: #555;
   }
 `;
 
 // Number input for items per page
 const PaginationInput = styled.input`
-  width: 60px;
-  padding: 0.5rem;
-  background-color: #333;
+  width: 50px;
+  padding: 0.4rem 0.35rem;
+  background-color: #1a1a1a;
   color: #eaeaea;
-  border: 1px solid #555;
+  border: 1px solid #444;
   border-radius: var(--radius-md);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   text-align: center;
+  transition: border-color 0.2s ease;
 
   &:focus {
     outline: none;
@@ -455,10 +494,24 @@ const PaginationInput = styled.input`
   -moz-appearance: textfield;
 `;
 
-// Page info text
-const PageInfo = styled.span`
-  color: #aaa;
-  font-size: 0.9rem;
+// Page indicator
+const PageIndicator = styled.span`
+  color: #999;
+  font-size: 0.8rem;
+  font-weight: 500;
+  white-space: nowrap;
+  
+  strong {
+    color: #eaeaea;
+  }
+`;
+
+// Vertical separator between control groups
+const PaginationSeparator = styled.span`
+  width: 1px;
+  height: 1.2rem;
+  background: #444;
+  flex-shrink: 0;
 `;
 
 
@@ -495,7 +548,7 @@ const SummaryPage: React.FC = () => {
   // These are helpers from React Router that let us work with the URL
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  
+
   //  gets the current view filter ("all", "expenses", or "incomes") from the URL
   const viewFilter = (searchParams.get('filter') as ViewFilter) || 'all';
 
@@ -506,7 +559,7 @@ const SummaryPage: React.FC = () => {
 
   const [selectedDropdownCategory, setSelectedDropdownCategory] = useState<number | ''>('');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-  
+
   // Pagination state
   const [itemsPerPage, setItemsPerPage] = useState<number>(10);
   const [currentPage, setCurrentPage] = useState<number>(0);
@@ -580,13 +633,13 @@ const SummaryPage: React.FC = () => {
   //  helper function to update category IDs in URL
   const updateCategoryFilters = useCallback((categoryIds: number[]) => {
     const newSearchParams = new URLSearchParams(searchParams);
-    
+
     //  remove the old category filters from the URL
     newSearchParams.delete('categories');
-    
+
     //  add the new category filters to the URL
     categoryIds.forEach(id => newSearchParams.append('categories', id.toString()));
-    
+
     setSearchParams(newSearchParams, { replace: true });
   }, [searchParams, setSearchParams]);
 
@@ -647,13 +700,13 @@ const SummaryPage: React.FC = () => {
   }, [sorted.length]);
 
 
-  /* Render */  
+  /* Render */
 
   // if there was an error fetching the payment items, show an error message
   if (error) return <p>Error: {error.message}</p>;
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: '1 1 auto' }}>
       <div
         style={{
           display: 'flex',
@@ -672,7 +725,7 @@ const SummaryPage: React.FC = () => {
       </div>
       <CategoryFilterWrapper>
         <h3>Filter by Categories</h3>
-        
+
         <CategoryDropdownContainer>
           <select
             value={selectedDropdownCategory}
@@ -744,13 +797,20 @@ const SummaryPage: React.FC = () => {
         </List>
       )}
 
-      {/* Pagination Footer - Fixed at bottom */}
-      {!isLoading && sorted.length > 0 && (
-        <PaginationFooter>
-          <PaginationLeft>
-            <PaginationButton onClick={handleShowClick}>
-              Show
-            </PaginationButton>
+      {/* Inline Pagination — scrolls into view after the last item */}
+      {!isLoading && sorted.length > 0 && totalPages > 1 && (
+        <PaginationSection>
+          <ArrowButton
+            onClick={handlePreviousPage}
+            $disabled={currentPage === 0}
+            disabled={currentPage === 0}
+            aria-label="Previous page"
+          >
+            <img src={ArrowLeftIcon} alt="Previous" />
+          </ArrowButton>
+
+          <PaginationCenter>
+            <PaginationLabel>Show</PaginationLabel>
             <PaginationInput
               type="number"
               min="1"
@@ -760,35 +820,29 @@ const SummaryPage: React.FC = () => {
               onFocus={(e) => e.target.select()}
               aria-label="Items per page"
             />
-            <AllButton onClick={handleAllClick}>
-              ALL
-            </AllButton>
-          </PaginationLeft>
+            <PaginationActionButton onClick={handleShowClick}>
+              Apply
+            </PaginationActionButton>
+            <PaginationAllButton onClick={handleAllClick}>
+              All
+            </PaginationAllButton>
+            <PaginationSeparator />
+            <PageIndicator>
+              Page <strong>{currentPage + 1}</strong> of <strong>{totalPages}</strong>
+            </PageIndicator>
+          </PaginationCenter>
 
-          <PaginationRight>
-            <PageInfo>
-              Page {currentPage + 1} of {totalPages} ({sorted.length} total)
-            </PageInfo>
-            <PaginationButton
-              onClick={handlePreviousPage}
-              $disabled={currentPage === 0}
-              disabled={currentPage === 0}
-              aria-label="Previous page"
-            >
-              Previous
-            </PaginationButton>
-            <PaginationButton
-              onClick={handleNextPage}
-              $disabled={currentPage >= totalPages - 1}
-              disabled={currentPage >= totalPages - 1}
-              aria-label="Next page"
-            >
-              Next
-            </PaginationButton>
-          </PaginationRight>
-        </PaginationFooter>
+          <ArrowButton
+            onClick={handleNextPage}
+            $disabled={currentPage >= totalPages - 1}
+            disabled={currentPage >= totalPages - 1}
+            aria-label="Next page"
+          >
+            <img src={ArrowRightIcon} alt="Next" />
+          </ArrowButton>
+        </PaginationSection>
       )}
-    </>
+    </div>
   );
 };
 
@@ -820,7 +874,7 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
   const iconUrl = React.useMemo(() => {
     // use the fetched standard category or the one from the item
     const category = item.standard_category || standardCategory;
-    
+
     if (category) {
       // check the category and its parents for an icon
       let current: Category | undefined = category;
@@ -831,7 +885,7 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
         current = allCategories.find(c => c.id === current?.parent_id);
       }
     }
-    
+
     return null;
   }, [item.standard_category, standardCategory, allCategories]);
 
@@ -856,7 +910,7 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
           download
         </DownloadLink>
       )}
-      
+
       <ImageHolder>
         {iconUrl ? (
           <img src={iconUrl} alt="Category icon" />
@@ -870,7 +924,7 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
         <MetaInfo>
           {/* Date is above the amount (in its own block) */}
           <DateText>{format(parseISO(item.date), 'PPP, HH:mm')}</DateText>
-          
+
           {/* Payment description */}
           {item.description && (
             <RecipientInfo>
@@ -879,17 +933,17 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
               </div>
             </RecipientInfo>
           )}
-          
+
           {/* enhanced recipient information display */}
           {recipient && (
             <RecipientInfo>
-              <div className="name"> { isExpense(item) ? (<u>To:</u>) : (<u>From:</u>) }  {recipient.name}</div>
+              <div className="name"> {isExpense(item) ? (<u>To:</u>) : (<u>From:</u>)}  {recipient.name}</div>
               {recipient.address && (
                 <div className="address">{recipient.address}</div>
               )}
             </RecipientInfo>
           )}
-          
+
           {/* enhanced categories display */}
           {item.categories && item.categories.length > 0 && (
             <CategoriesInfo>

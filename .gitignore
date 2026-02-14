@@ -26,3 +26,8 @@ Thumbs.db
 # IDEs
 .vscode/
 .idea/
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.venv/
