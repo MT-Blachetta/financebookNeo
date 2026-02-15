@@ -26,6 +26,32 @@ const api = axios.create({
   timeout: 10_000,
 });
 
+// ── Auth interceptors ──────────────────────────────────────────────
+// Attach stored JWT to every outgoing request.
+api.interceptors.request.use((config) => {
+  const token =
+    localStorage.getItem('financebook_token') ??
+    sessionStorage.getItem('financebook_token');
+  if (token && config.headers) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+// On 401 responses, clear the stored token so the UI can redirect to login.
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      localStorage.removeItem('financebook_token');
+      sessionStorage.removeItem('financebook_token');
+      // Reload to re-trigger the auth check and redirect to login
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  },
+);
+
 
 /* Helpers */
 
@@ -130,7 +156,7 @@ export function useUpdatePaymentItem() {
   const queryClient = useQueryClient();
   // The API now expects a 'PaymentItemUpdate' schema.
   // The mutation variable type is generic to accept the form data.
-  return useMutation<PaymentItem, Error, { id: number; [key: string]: any; category_ids?: number[] }>({
+  return useMutation<PaymentItem, Error, { id: number;[key: string]: any; category_ids?: number[] }>({
     mutationFn: async (itemToUpdate) => {
       const { id, ...updateData } = itemToUpdate;
       const res = await api.put<PaymentItem>(
@@ -499,12 +525,12 @@ export async function downloadInvoice(paymentItemId: number): Promise<void> {
     const response = await api.get(`/download-invoice/${paymentItemId}`, {
       responseType: 'blob',
     });
-    
+
     // create blob link to download
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;
-    
+
     // try to get filename from Content-Disposition header
     const contentDisposition = response.headers['content-disposition'];
     let filename = `invoice_${paymentItemId}.pdf`;
@@ -514,7 +540,7 @@ export async function downloadInvoice(paymentItemId: number): Promise<void> {
         filename = filenameMatch[1];
       }
     }
-    
+
     link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();

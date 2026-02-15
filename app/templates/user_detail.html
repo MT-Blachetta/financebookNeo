@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}{{ user.prename }} {{ user.surname }} - FinanceBook Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-header-row">
+        <div>
+            <h1>{{ user.prename }} {{ user.surname }}</h1>
+            <p class="page-subtitle">@{{ user.username }} · User #{{ user.id }}</p>
+        </div>
+        <div class="page-header-actions">
+            <a href="/admin/users" class="btn btn-ghost">← Back to Users</a>
+        </div>
+    </div>
+</div>
+
+{% if success %}
+<div class="alert alert-success">
+    <span class="alert-icon">✅</span>
+    {{ success }}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">
+    <span class="alert-icon">⚠️</span>
+    {{ error }}
+</div>
+{% endif %}
+
+<div class="detail-grid">
+    <!-- User Statistics -->
+    <div class="detail-sidebar">
+        <div class="info-card">
+            <h3>Account Info</h3>
+            <dl class="info-list">
+                <dt>Created</dt>
+                <dd>{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</dd>
+                <dt>Role</dt>
+                <dd>
+                    {% if user.is_admin %}
+                    <span class="badge badge-admin">Admin</span>
+                    {% else %}
+                    <span class="badge badge-user">User</span>
+                    {% endif %}
+                </dd>
+                <dt>Status</dt>
+                <dd>
+                    {% if user.is_active %}
+                    <span class="badge badge-active">Active</span>
+                    {% else %}
+                    <span class="badge badge-inactive">Inactive</span>
+                    {% endif %}
+                </dd>
+            </dl>
+        </div>
+
+        <div class="info-card">
+            <h3>Data Statistics</h3>
+            <dl class="info-list">
+                <dt>Payment Items</dt>
+                <dd>{{ payment_count }}</dd>
+                <dt>Recipients</dt>
+                <dd>{{ recipient_count }}</dd>
+                <dt>Categories</dt>
+                <dd>{{ category_count }}</dd>
+            </dl>
+        </div>
+
+        <div class="info-card">
+            <h3>Actions</h3>
+            <form method="POST" action="/admin/users/{{ user.id }}/deactivate"
+                data-confirm="{{ 'Activate' if not user.is_active else 'Deactivate' }} this user?">
+                <button type="submit" class="btn {{ 'btn-success' if not user.is_active else 'btn-danger' }} btn-full">
+                    {{ 'Activate Account' if not user.is_active else 'Deactivate Account' }}
+                </button>
+            </form>
+            <script>
+                document.querySelector('[data-confirm]').addEventListener('submit', function (e) {
+                    if (!confirm(this.dataset.confirm)) e.preventDefault();
+                });
+            </script>
+        </div>
+    </div>
+
+    <!-- Edit Form -->
+    <div class="detail-main">
+        <div class="form-card">
+            <h2>Edit User Details</h2>
+            <form method="POST" action="/admin/users/{{ user.id }}" class="edit-form">
+                <fieldset>
+                    <legend>Personal Information</legend>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="prename">First Name</label>
+                            <input type="text" id="prename" name="prename" value="{{ user.prename }}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="surname">Last Name</label>
+                            <input type="text" id="surname" name="surname" value="{{ user.surname }}" required>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="birth_date">Date of Birth</label>
+                            <input type="date" id="birth_date" name="birth_date"
+                                value="{{ user.birth_date|string if user.birth_date else '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="phone">Phone Number</label>
+                            <input type="tel" id="phone" name="phone" value="{{ user.phone or '' }}"
+                                placeholder="+49 123 456789">
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Address</legend>
+                    <div class="form-row">
+                        <div class="form-group form-group-wide">
+                            <label for="road">Street / Road</label>
+                            <input type="text" id="road" name="road" value="{{ user.road or '' }}">
+                        </div>
+                        <div class="form-group form-group-narrow">
+                            <label for="house_number">House No.</label>
+                            <input type="text" id="house_number" name="house_number"
+                                value="{{ user.house_number or '' }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="postal">Postal Code</label>
+                            <input type="text" id="postal" name="postal" value="{{ user.postal or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="city">City</label>
+                            <input type="text" id="city" name="city" value="{{ user.city or '' }}">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="region">Region</label>
+                            <input type="text" id="region" name="region" value="{{ user.region or '' }}">
+                        </div>
+                        <div class="form-group">
+                            <label for="state">State / Province</label>
+                            <input type="text" id="state" name="state" value="{{ user.state or '' }}">
+                        </div>
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Security</legend>
+                    <div class="form-group">
+                        <label for="new_password">New Password</label>
+                        <input type="password" id="new_password" name="new_password"
+                            placeholder="Leave blank to keep current password" autocomplete="new-password"
+                            minlength="6">
+                        <span class="form-hint">Minimum 6 characters. Leave blank to keep the current password.</span>
+                    </div>
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input type="hidden" name="is_active" value="off">
+                            <input type="checkbox" name="is_active" value="on" {{ 'checked' if user.is_active }}>
+                            Account is active
+                        </label>
+                    </div>
+                </fieldset>
+
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                    <a href="/admin/users" class="btn btn-ghost">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

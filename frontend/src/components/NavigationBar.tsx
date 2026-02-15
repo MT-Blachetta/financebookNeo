@@ -54,6 +54,9 @@ interface NavigationBarProps {
 
   /** Optional callback when user clicks the ADD button. */
   onAdd?(): void;
+
+  /** Callback when user clicks the Logout button. */
+  onLogout(): void;
 }
 
 
@@ -182,6 +185,28 @@ const RightSection = styled.div`
   gap: var(--spacing-sm);
 `;
 
+const LogoutButton = styled.button`
+  background: #2563eb;
+  color: white;
+  border: none;
+  padding: var(--spacing-xs) var(--spacing-md);
+  border-radius: var(--radius-md);
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  white-space: nowrap;
+
+  &:hover {
+    background: #1d4ed8;
+  }
+
+  @media (max-width: 640px) {
+    padding: var(--spacing-xs) var(--spacing-sm);
+    font-size: 0.8rem;
+  }
+`;
+
 const CSVButtons = styled.div`
   display: flex;
   gap: var(--spacing-sm);
@@ -222,15 +247,23 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
   onChange,
   onMenu,
   onAdd,
+  onLogout,
 }) => {
   const navigate = useNavigate();
   const importCsvMutation = useImportCSV();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
+  const getAuthHeaders = (): HeadersInit => {
+    const token =
+      localStorage.getItem('financebook_token') ??
+      sessionStorage.getItem('financebook_token');
+    return token ? { Authorization: `Bearer ${token}` } : {};
+  };
+
   const handleExportCSV = async () => {
     try {
       // fetch all payment items without any filters
-      const response = await fetch('/api/payment-items');
+      const response = await fetch('/api/payment-items', { headers: getAuthHeaders() });
       if (!response.ok) {
         throw new Error('Failed to fetch payment items');
       }
@@ -253,7 +286,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
         let recipientAddress = '';
         if (item.recipient_id) {
           try {
-            const recipientResponse = await fetch(`/api/recipients/${item.recipient_id}`);
+            const recipientResponse = await fetch(`/api/recipients/${item.recipient_id}`, { headers: getAuthHeaders() });
             if (recipientResponse.ok) {
               const recipient = await recipientResponse.json();
               recipientName = recipient.name || '';
@@ -268,7 +301,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
         let standardCategoryName = '';
         if (item.standard_category_id) {
           try {
-            const categoryResponse = await fetch(`/api/categories/${item.standard_category_id}`);
+            const categoryResponse = await fetch(`/api/categories/${item.standard_category_id}`, { headers: getAuthHeaders() });
             if (categoryResponse.ok) {
               const category = await categoryResponse.json();
               standardCategoryName = category.name || '';
@@ -399,6 +432,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
         {onAdd && <AddButton onClick={onAdd}>ADD</AddButton>}
         <MenuButton aria-label="Open Menu" onClick={onMenu}>
         </MenuButton>
+        <LogoutButton onClick={onLogout}>Logout</LogoutButton>
       </RightSection>
     </Bar>
   );

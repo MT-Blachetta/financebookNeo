@@ -9,6 +9,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
 from fastapi.responses import FileResponse
+from fastapi.security import OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
 from sqlmodel import Session, select
 
 from app.database import create_db_and_tables, get_session
@@ -17,6 +19,7 @@ from app.constants import (
     MAX_DESCRIPTION_LENGTH,
     MAX_RECIPIENT_ADDRESS_LENGTH,
     MAX_RECIPIENT_NAME_LENGTH,
+    MAX_USERNAME_LENGTH,
 )
 from app.models import (
     PaymentItem,
@@ -28,7 +31,18 @@ from app.models import (
     CategoryUpdate,
     Recipient,
     RecipientUpdate,
-    PaymentItemCategoryLink, # import for joining
+    PaymentItemCategoryLink,
+    User,
+    UserCreate,
+    UserRead,
+    UserUpdate,
+)
+from app.auth import (
+    hash_password,
+    verify_password,
+    create_access_token,
+    get_current_user,
+    get_current_admin,
 )
 
 
@@ -46,7 +60,7 @@ AMOUNT_PATTERN = re.compile(r"^-?\d+(?:\.\d+)?$")
 DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 BOOLEAN_PATTERN = re.compile(r"^(true|false)$", re.IGNORECASE)
 
-app = FastAPI(title="FinanceBook API", version="0.1.0")
+app = FastAPI(title="FinanceBook API", version="0.2.0")
 
 # directory where uploaded category icon files are stored
 ICON_DIR = Path("icons")
@@ -55,6 +69,11 @@ ICON_DIR.mkdir(exist_ok=True)
 # directory where uploaded invoice files are stored
 INVOICE_DIR = Path("app/invoices")
 INVOICE_DIR.mkdir(exist_ok=True)
+
+# directory for static admin assets
+STATIC_DIR = Path("app/static")
+STATIC_DIR.mkdir(exist_ok=True)
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 def _normalize_name(raw_name: str) -> str:
@@ -73,25 +92,47 @@ def on_startup() -> None:
 
 
 def initialize_default_data() -> None:
-    """Initialize default data like the 'standard' category type."""
+    """Initialize default data: admin user, standard category type, UNCLASSIFIED."""
     from app.database import engine
     with Session(engine) as session:
-        # check if 'standard' category type already exists
+        # ── Seed default admin account ──────────────────────────────
+        admin_user = session.exec(
+            select(User).where(User.username == "admin")
+        ).first()
+
+        if not admin_user:
+            import os
+            from dotenv import load_dotenv
+            load_dotenv()
+            default_pw = os.getenv("ADMIN_DEFAULT_PASSWORD", "admin")
+            admin_user = User(
+                username="admin",
+                hashed_password=hash_password(default_pw),
+                surname="Administrator",
+                prename="System",
+                is_admin=True,
+                is_active=True,
+            )
+            session.add(admin_user)
+            session.commit()
+            session.refresh(admin_user)
+
+        # ── Standard category type ─────────────────────────────────
         standard_type = session.exec(
             select(CategoryType).where(CategoryType.name == "standard")
         ).first()
-        
+
         if not standard_type:
-            # create the default 'standard' category type
             standard_type = CategoryType(
                 name="standard",
-                description="Default category type for basic expense/income classification"
+                description="Default category type for basic expense/income classification",
+                user_id=admin_user.id,
             )
             session.add(standard_type)
             session.commit()
             session.refresh(standard_type)
 
-        # create default 'UNCLASSIFIED' category if it doesn't exist
+        # ── Default UNCLASSIFIED category ──────────────────────────
         unclassified = session.exec(
             select(Category).where(Category.name == "UNCLASSIFIED")
         ).first()
@@ -100,16 +141,233 @@ def initialize_default_data() -> None:
                 name="UNCLASSIFIED",
                 type_id=standard_type.id,
                 parent_id=None,
+                user_id=admin_user.id,
             )
             session.add(unclassified)
             session.commit()
 
+        # ── Assign orphaned records to admin (migration) ───────────
+        _assign_orphaned_records(session, admin_user.id)
 
 
+def _assign_orphaned_records(session: Session, admin_id: int) -> None:
+    """Assign any records without a user_id to the admin user (one-time migration)."""
+    for model in (PaymentItem, Recipient, CategoryType, Category):
+        orphans = session.exec(
+            select(model).where(model.user_id == None)  # noqa: E711
+        ).all()
+        for record in orphans:
+            record.user_id = admin_id
+            session.add(record)
+    session.commit()
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  AUTHENTICATION ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════
+
+@app.post("/auth/login")
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Authenticate with username/password and receive a JWT access token."""
+    user = session.exec(
+        select(User).where(User.username == form_data.username)
+    ).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not user.is_active:
+        raise HTTPException(status_code=403, detail="User account is deactivated")
+
+    token = create_access_token(data={"sub": user.username})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+@app.post("/auth/register", response_model=UserRead)
+def register(
+    user_data: UserCreate,
+    session: Session = Depends(get_session),
+) -> User:
+    """Register a new user account."""
+    normalized_username = _normalize_name(user_data.username)
+    if not normalized_username:
+        raise HTTPException(status_code=400, detail="Username cannot be empty")
+    if len(normalized_username) > MAX_USERNAME_LENGTH:
+        raise HTTPException(status_code=400, detail=f"Username exceeds {MAX_USERNAME_LENGTH} characters")
+
+    existing = session.exec(
+        select(User).where(User.username == normalized_username)
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already taken")
+
+    if len(user_data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+
+    new_user = User(
+        username=normalized_username,
+        hashed_password=hash_password(user_data.password),
+        surname=_normalize_name(user_data.surname),
+        prename=_normalize_name(user_data.prename),
+        birth_date=user_data.birth_date,
+        phone=user_data.phone,
+        road=user_data.road,
+        house_number=user_data.house_number,
+        region=user_data.region,
+        postal=user_data.postal,
+        city=user_data.city,
+        state=user_data.state,
+        is_admin=False,
+        is_active=True,
+    )
+    session.add(new_user)
+    session.commit()
+    session.refresh(new_user)
+
+    # Create default category type and UNCLASSIFIED category for the new user
+    standard_type = CategoryType(
+        name="standard",
+        description="Default category type for basic expense/income classification",
+        user_id=new_user.id,
+    )
+    session.add(standard_type)
+    session.commit()
+    session.refresh(standard_type)
+
+    unclassified = Category(
+        name="UNCLASSIFIED",
+        type_id=standard_type.id,
+        parent_id=None,
+        user_id=new_user.id,
+    )
+    session.add(unclassified)
+    session.commit()
+
+    return new_user
+
+
+@app.get("/auth/me", response_model=UserRead)
+def get_profile(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Return the profile of the currently authenticated user."""
+    return current_user
+
+
+@app.put("/auth/me", response_model=UserRead)
+def update_profile(
+    user_update: UserUpdate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> User:
+    """Update the profile of the currently authenticated user."""
+    update_data = user_update.dict(exclude_unset=True)
+
+    if "password" in update_data and update_data["password"]:
+        if len(update_data["password"]) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        current_user.hashed_password = hash_password(update_data["password"])
+        del update_data["password"]
+
+    for key, value in update_data.items():
+        if key == "surname" or key == "prename":
+            value = _normalize_name(value) if value else value
+        setattr(current_user, key, value)
+
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  ADMIN API ENDPOINTS
+# ═══════════════════════════════════════════════════════════════════
+
+@app.get("/admin/api/users", response_model=List[UserRead])
+def admin_list_users(
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+) -> List[User]:
+    """List all users (admin only)."""
+    return session.exec(select(User)).all()
+
+
+@app.get("/admin/api/users/{user_id}", response_model=UserRead)
+def admin_get_user(
+    user_id: int,
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+) -> User:
+    """Get a user by ID (admin only)."""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@app.put("/admin/api/users/{user_id}", response_model=UserRead)
+def admin_update_user(
+    user_id: int,
+    user_update: UserUpdate,
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+) -> User:
+    """Update a user (admin only)."""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    update_data = user_update.dict(exclude_unset=True)
+
+    if "password" in update_data and update_data["password"]:
+        if len(update_data["password"]) < 6:
+            raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
+        user.hashed_password = hash_password(update_data["password"])
+        del update_data["password"]
+
+    for key, value in update_data.items():
+        if key in ("surname", "prename"):
+            value = _normalize_name(value) if value else value
+        setattr(user, key, value)
+
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return user
+
+
+@app.delete("/admin/api/users/{user_id}")
+def admin_deactivate_user(
+    user_id: int,
+    admin: User = Depends(get_current_admin),
+    session: Session = Depends(get_session),
+) -> dict:
+    """Deactivate a user account (admin only). Does not delete data."""
+    user = session.get(User, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if user.id == admin.id:
+        raise HTTPException(status_code=400, detail="Cannot deactivate your own admin account")
+    user.is_active = False
+    session.add(user)
+    session.commit()
+    return {"message": f"User '{user.username}' has been deactivated"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  PAYMENT ITEM ENDPOINTS  (scoped to authenticated user)
+# ═══════════════════════════════════════════════════════════════════
 
 @app.post("/payment-items", response_model=PaymentItemRead)
 def create_payment_item(
     item_create: PaymentItemCreate,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> PaymentItem:
     # 1. Validate recipient if provided
@@ -117,9 +375,13 @@ def create_payment_item(
         recipient = session.get(Recipient, item_create.recipient_id)
         if not recipient:
             raise HTTPException(status_code=404, detail=f"Recipient with id {item_create.recipient_id} not found")
+        if recipient.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Recipient does not belong to you")
 
     # 2. Get standard type ID for later use
-    standard_type = session.exec(select(CategoryType).where(CategoryType.name == "standard")).first()
+    standard_type = session.exec(
+        select(CategoryType).where(CategoryType.name == "standard", CategoryType.user_id == current_user.id)
+    ).first()
     standard_type_id = standard_type.id if standard_type else None
 
     # 3. Validate categories if provided
@@ -131,6 +393,8 @@ def create_payment_item(
             category = session.get(Category, cat_id)
             if not category:
                 raise HTTPException(status_code=404, detail=f"Category with id {cat_id} not found")
+            if category.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail=f"Category {cat_id} does not belong to you")
             if category.type_id in seen_types:
                 raise HTTPException(status_code=400, detail="Only one category per type is allowed")
             seen_types.add(category.type_id)
@@ -141,15 +405,18 @@ def create_payment_item(
                 standard_category_id = cat_id
     else:
         # Assign the default UNCLASSIFIED category
-        default_cat = session.exec(select(Category).where(Category.name == "UNCLASSIFIED")).first()
+        default_cat = session.exec(
+            select(Category).where(Category.name == "UNCLASSIFIED", Category.user_id == current_user.id)
+        ).first()
         if default_cat:
             category_ids.append(default_cat.id)
             if standard_type_id and default_cat.type_id == standard_type_id:
                 standard_category_id = default_cat.id
 
     # 4. Create PaymentItem instance from the payload
-    item_data = item_create.dict(exclude={"category_ids"})
+    item_data = item_create.dict(exclude={"category_ids", "user_id"})
     item_data["standard_category_id"] = standard_category_id
+    item_data["user_id"] = current_user.id
     db_item = PaymentItem(**item_data)
 
     # 5. Add to session and commit
@@ -172,6 +439,7 @@ def list_payment_items(
     expense_only: bool = False,
     income_only: bool = False,
     category_ids: Optional[List[int]] = Query(None, description="List of category IDs to filter by"),
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> List[PaymentItem]:
     import logging
@@ -181,7 +449,7 @@ def list_payment_items(
     if expense_only and income_only:
         raise HTTPException(status_code=400, detail="Choose only one filter: expense_only or income_only")
 
-    query = select(PaymentItem)
+    query = select(PaymentItem).where(PaymentItem.user_id == current_user.id)
     if expense_only:
         query = query.where(PaymentItem.amount < 0)
     if income_only:
@@ -210,14 +478,12 @@ def list_payment_items(
         logger.info(f"Expanded category IDs (including descendants): {expanded_ids}")
 
         # Use explicit OR logic: return payment items that have ANY of the selected categories
-        # We use a subquery to find payment item IDs that have at least one of the selected categories
         subquery = (
             select(PaymentItemCategoryLink.payment_item_id)
             .where(PaymentItemCategoryLink.category_id.in_(expanded_ids))
             .distinct()
         )
         
-        # Filter the main query to only include payment items found in the subquery
         query = query.where(PaymentItem.id.in_(subquery))
         
         logger.info(f"Generated explicit OR logic query for category filtering")
@@ -229,10 +495,16 @@ def list_payment_items(
 
 
 @app.get("/payment-items/{item_id}", response_model=PaymentItemRead)
-def get_payment_item(item_id: int, session: Session = Depends(get_session)) -> PaymentItem:
+def get_payment_item(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> PaymentItem:
     item = session.get(PaymentItem, item_id)
     if not item:
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this item")
     return item
 
 
@@ -240,6 +512,7 @@ def get_payment_item(item_id: int, session: Session = Depends(get_session)) -> P
 def update_payment_item(
     item_id: int,
     item_update: PaymentItemUpdate,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> PaymentItem:
     import logging
@@ -254,15 +527,17 @@ def update_payment_item(
         if not db_item:
             logger.error(f"Payment item {item_id} not found")
             raise HTTPException(status_code=404, detail="Item not found")
+        if db_item.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to update this item")
 
         logger.info(f"Found existing item: {db_item}")
 
         # 1. Update standard fields
         update_data = item_update.dict(exclude_unset=True)
-        logger.info(f"Processing standard fields: {[k for k in update_data.keys() if k != 'category_ids']}")
+        logger.info(f"Processing standard fields: {[k for k in update_data.keys() if k not in ('category_ids', 'user_id')]}")
         
         for key, value in update_data.items():
-            if key != "category_ids": # defer category update
+            if key not in ("category_ids", "user_id"):  # defer category update, protect user_id
                 logger.debug(f"Setting {key} = {value}")
                 setattr(db_item, key, value)
 
@@ -273,6 +548,8 @@ def update_payment_item(
             if not recipient:
                 logger.error(f"Recipient {item_update.recipient_id} not found")
                 raise HTTPException(status_code=404, detail=f"Recipient with id {item_update.recipient_id} not found")
+            if recipient.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Recipient does not belong to you")
             db_item.recipient_id = item_update.recipient_id
             logger.info(f"Recipient updated successfully")
 
@@ -281,7 +558,9 @@ def update_payment_item(
             logger.info(f"Processing categories: {item_update.category_ids}")
             
             # get standard type ID for later use
-            standard_type = session.exec(select(CategoryType).where(CategoryType.name == "standard")).first()
+            standard_type = session.exec(
+                select(CategoryType).where(CategoryType.name == "standard", CategoryType.user_id == current_user.id)
+            ).first()
             standard_type_id = standard_type.id if standard_type else None
             
             # first, remove existing category links
@@ -304,6 +583,8 @@ def update_payment_item(
                     if not category:
                         logger.error(f"Category {cat_id} not found")
                         raise HTTPException(status_code=404, detail=f"Category with id {cat_id} not found")
+                    if category.user_id != current_user.id:
+                        raise HTTPException(status_code=403, detail=f"Category {cat_id} does not belong to you")
                     if category.type_id in seen_types:
                         logger.error(f"Duplicate category type {category.type_id}")
                         raise HTTPException(status_code=400, detail="Only one category per type is allowed")
@@ -321,7 +602,9 @@ def update_payment_item(
             else:
                 # assign default UNCLASSIFIED category
                 logger.info("No categories provided, assigning UNCLASSIFIED")
-                default_cat = session.exec(select(Category).where(Category.name == "UNCLASSIFIED")).first()
+                default_cat = session.exec(
+                    select(Category).where(Category.name == "UNCLASSIFIED", Category.user_id == current_user.id)
+                ).first()
                 if default_cat:
                     categories.append(default_cat)
                     if standard_type_id and default_cat.type_id == standard_type_id:
@@ -351,7 +634,11 @@ def update_payment_item(
 
 
 @app.delete("/payment-items/{item_id}", status_code=204)
-def delete_payment_item(item_id: int, session: Session = Depends(get_session)) -> None:
+def delete_payment_item(
+    item_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> None:
     import os
     import logging
     
@@ -364,6 +651,8 @@ def delete_payment_item(item_id: int, session: Session = Depends(get_session)) -
     if not item:
         logger.error(f"Payment item {item_id} not found")
         raise HTTPException(status_code=404, detail="Item not found")
+    if item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this item")
     
     logger.info(f"Found payment item: {item}")
     
@@ -398,10 +687,17 @@ def delete_payment_item(item_id: int, session: Session = Depends(get_session)) -
     logger.info(f"Successfully deleted payment item {item_id}")
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  CATEGORY TYPE ENDPOINTS  (scoped to authenticated user)
+# ═══════════════════════════════════════════════════════════════════
+
 @app.post("/category-types", response_model=CategoryType)
 def create_category_type(
-    ct: CategoryType, session: Session = Depends(get_session)
+    ct: CategoryType,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> CategoryType:
+    ct.user_id = current_user.id
     session.add(ct)
     session.commit()
     session.refresh(ct)
@@ -409,24 +705,39 @@ def create_category_type(
 
 
 @app.get("/category-types", response_model=List[CategoryType])
-def list_category_types(session: Session = Depends(get_session)) -> List[CategoryType]:
-    return session.exec(select(CategoryType)).all()
+def list_category_types(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> List[CategoryType]:
+    return session.exec(
+        select(CategoryType).where(CategoryType.user_id == current_user.id)
+    ).all()
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  CATEGORY ENDPOINTS  (scoped to authenticated user)
+# ═══════════════════════════════════════════════════════════════════
 
 @app.post("/categories", response_model=Category)
-def create_category(category: Category, session: Session = Depends(get_session)) -> Category:
+def create_category(
+    category: Category,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Category:
     normalized_name = _normalize_name(category.name)
     if not normalized_name:
         raise HTTPException(status_code=400, detail="Category name cannot be empty")
 
-    # ensure the normalized name is unique across all categories
-    existing_categories = session.exec(select(Category)).all()
+    # ensure the normalized name is unique within this user's categories
+    existing_categories = session.exec(
+        select(Category).where(Category.user_id == current_user.id)
+    ).all()
     for existing in existing_categories:
         if _normalize_name(existing.name) == normalized_name:
             raise HTTPException(status_code=400, detail="Category name already exists")
 
     category.name = normalized_name
+    category.user_id = current_user.id
 
     # Parent/type validation
     if category.parent_id and not session.get(Category, category.parent_id):
@@ -444,11 +755,14 @@ def create_category(category: Category, session: Session = Depends(get_session))
 def update_category(
     category_id: int,
     category_update: CategoryUpdate,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Category:
     category = session.get(Category, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+    if category.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to update this category")
 
     update_data = category_update.dict(exclude_unset=True)
 
@@ -457,7 +771,9 @@ def update_category(
         if not normalized_name:
             raise HTTPException(status_code=400, detail="Category name cannot be empty")
 
-        existing_categories = session.exec(select(Category).where(Category.id != category_id)).all()
+        existing_categories = session.exec(
+            select(Category).where(Category.id != category_id, Category.user_id == current_user.id)
+        ).all()
         for existing in existing_categories:
             if _normalize_name(existing.name) == normalized_name:
                 raise HTTPException(status_code=400, detail="Category name already exists")
@@ -482,28 +798,45 @@ def update_category(
 
 
 @app.get("/categories/{category_id}", response_model=Category)
-def get_category(category_id: int, session: Session = Depends(get_session)) -> Category:
+def get_category(
+    category_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Category:
     """Get a single category by its ID."""
     category = session.get(Category, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
+    if category.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this category")
     return category
 
 
 @app.get("/categories/{category_id}/tree", response_model=Category)
-def get_category_tree(category_id: int, session: Session = Depends(get_session)) -> Category:
+def get_category_tree(
+    category_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Category:
     category = session.get(Category, category_id)
     if not category:
         raise HTTPException(status_code=404, detail="Category not found")
-    # children are lazy-loaded, FastAPI serialises recursively
+    if category.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this category")
     return category
 
 
 @app.get("/categories/{category_id}/descendants", response_model=List[Category])
-def list_category_descendants(category_id: int, session: Session = Depends(get_session)) -> List[Category]:
+def list_category_descendants(
+    category_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> List[Category]:
     root = session.get(Category, category_id)
     if not root:
         raise HTTPException(status_code=404, detail="Category not found")
+    if root.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this category")
     descendants: List[Category] = []
     queue = [category_id]
     while queue:
@@ -513,33 +846,54 @@ def list_category_descendants(category_id: int, session: Session = Depends(get_s
             descendants.append(child)
             queue.append(child.id)
     return descendants
-@app.get("/categories/by-type/{type_id}", response_model=List[Category])
 
+
+@app.get("/categories/by-type/{type_id}", response_model=List[Category])
 def list_categories_by_type(
-    type_id: int, session: Session = Depends(get_session)
+    type_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> List[Category]:
-    return session.exec(select(Category).where(Category.type_id == type_id)).all()
+    return session.exec(
+        select(Category).where(Category.type_id == type_id, Category.user_id == current_user.id)
+    ).all()
 
 
 @app.get("/categories", response_model=List[Category])
-def list_all_categories(session: Session = Depends(get_session)) -> List[Category]:
-    """Get all categories regardless of their type."""
-    return session.exec(select(Category)).all()
+def list_all_categories(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> List[Category]:
+    """Get all categories for the current user."""
+    return session.exec(
+        select(Category).where(Category.user_id == current_user.id)
+    ).all()
 
+
+# ═══════════════════════════════════════════════════════════════════
+#  RECIPIENT ENDPOINTS  (scoped to authenticated user)
+# ═══════════════════════════════════════════════════════════════════
 
 @app.post("/recipients", response_model=Recipient)
-def create_recipient(recipient: Recipient, session: Session = Depends(get_session)) -> Recipient:
+def create_recipient(
+    recipient: Recipient,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> Recipient:
     normalized_name = _normalize_name(recipient.name)
     if not normalized_name:
         raise HTTPException(status_code=400, detail="Recipient name cannot be empty")
 
-    existing_recipients = session.exec(select(Recipient)).all()
+    existing_recipients = session.exec(
+        select(Recipient).where(Recipient.user_id == current_user.id)
+    ).all()
     for existing in existing_recipients:
         if _normalize_name(existing.name) == normalized_name:
             raise HTTPException(status_code=400, detail="Recipient name already exists")
 
     recipient.name = normalized_name
     recipient.address = recipient.address.strip() if recipient.address else None
+    recipient.user_id = current_user.id
 
     session.add(recipient)
     session.commit()
@@ -548,18 +902,27 @@ def create_recipient(recipient: Recipient, session: Session = Depends(get_sessio
 
 
 @app.get("/recipients", response_model=List[Recipient])
-def list_recipients(session: Session = Depends(get_session)) -> List[Recipient]:
-    return session.exec(select(Recipient)).all()
+def list_recipients(
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> List[Recipient]:
+    return session.exec(
+        select(Recipient).where(Recipient.user_id == current_user.id)
+    ).all()
 
 
 @app.get("/recipients/{recipient_id}", response_model=Recipient)
 def get_recipient(
-    recipient_id: int, session: Session = Depends(get_session)
+    recipient_id: int,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
 ) -> Recipient:
     """Fetch a single recipient by its ID."""
     recipient = session.get(Recipient, recipient_id)
     if not recipient:
         raise HTTPException(status_code=404, detail="Recipient not found")
+    if recipient.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this recipient")
     return recipient
 
 
@@ -567,11 +930,14 @@ def get_recipient(
 def update_recipient(
     recipient_id: int,
     recipient_update: RecipientUpdate,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> Recipient:
     recipient = session.get(Recipient, recipient_id)
     if not recipient:
         raise HTTPException(status_code=404, detail="Recipient not found")
+    if recipient.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to update this recipient")
 
     update_data = recipient_update.dict(exclude_unset=True)
 
@@ -580,7 +946,9 @@ def update_recipient(
         if not normalized_name:
             raise HTTPException(status_code=400, detail="Recipient name cannot be empty")
 
-        existing_recipients = session.exec(select(Recipient).where(Recipient.id != recipient_id)).all()
+        existing_recipients = session.exec(
+            select(Recipient).where(Recipient.id != recipient_id, Recipient.user_id == current_user.id)
+        ).all()
         for existing in existing_recipients:
             if _normalize_name(existing.name) == normalized_name:
                 raise HTTPException(status_code=400, detail="Recipient name already exists")
@@ -600,8 +968,15 @@ def update_recipient(
     return recipient
 
 
+# ═══════════════════════════════════════════════════════════════════
+#  FILE UPLOAD ENDPOINTS  (with ownership checks)
+# ═══════════════════════════════════════════════════════════════════
+
 @app.post("/uploadicon/")
-def upload_icon(file: UploadFile = File(...)) -> dict:
+def upload_icon(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
+) -> dict:
     """Save an uploaded icon file and return its filename."""
     # validate file type
     allowed_types = {
@@ -637,16 +1012,19 @@ def download_icon(filename: str) -> FileResponse:
 def upload_invoice(
     payment_item_id: int,
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> dict:
     """Upload an invoice file for a payment item."""
     import os
     import uuid
     
-    # validate payment item exists
+    # validate payment item exists and belongs to user
     payment_item = session.get(PaymentItem, payment_item_id)
     if not payment_item:
         raise HTTPException(status_code=404, detail="Payment item not found")
+    if payment_item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to upload invoices for this item")
     
     # validate file type
     allowed_types = {
@@ -705,6 +1083,7 @@ def upload_invoice(
 @app.post("/import-csv")
 def import_csv(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> dict:
     """Import payment items, recipients, and categories from an exported CSV file."""
@@ -840,18 +1219,26 @@ def import_csv(
         if row["normalized_category"]
     }
 
-    # Fetch existing recipients and categories from the database for deduplication
-    existing_recipients = session.exec(select(Recipient)).all()
+    # Fetch existing recipients and categories for THIS USER for deduplication
+    existing_recipients = session.exec(
+        select(Recipient).where(Recipient.user_id == current_user.id)
+    ).all()
     recipient_lookup = {_normalize_name(rec.name): rec for rec in existing_recipients}
 
-    existing_categories = session.exec(select(Category)).all()
+    existing_categories = session.exec(
+        select(Category).where(Category.user_id == current_user.id)
+    ).all()
     category_lookup = {_normalize_name(cat.name): cat for cat in existing_categories}
 
-    standard_type = session.exec(select(CategoryType).where(CategoryType.name == "standard")).first()
+    standard_type = session.exec(
+        select(CategoryType).where(CategoryType.name == "standard", CategoryType.user_id == current_user.id)
+    ).first()
     if not standard_type:
         raise HTTPException(status_code=500, detail="Standard category type is not configured")
 
-    default_category = session.exec(select(Category).where(Category.name == "UNCLASSIFIED")).first()
+    default_category = session.exec(
+        select(Category).where(Category.name == "UNCLASSIFIED", Category.user_id == current_user.id)
+    ).first()
 
     created_recipients = 0
     updated_recipients = 0
@@ -868,24 +1255,24 @@ def import_csv(
                 updated_recipients += 1
             recipient_ids[name] = existing.id
         else:
-            new_recipient = Recipient(name=name, address=address)
+            new_recipient = Recipient(name=name, address=address, user_id=current_user.id)
             session.add(new_recipient)
             session.flush()
             recipient_ids[name] = new_recipient.id
             created_recipients += 1
 
     created_categories = 0
-    category_ids: dict[str, int] = {}
+    category_ids_map: dict[str, int] = {}
     for name in category_names:
         existing_category = category_lookup.get(name)
         if existing_category:
-            category_ids[name] = existing_category.id
+            category_ids_map[name] = existing_category.id
             continue
 
-        new_category = Category(name=name, type_id=standard_type.id, parent_id=None)
+        new_category = Category(name=name, type_id=standard_type.id, parent_id=None, user_id=current_user.id)
         session.add(new_category)
         session.flush()
-        category_ids[name] = new_category.id
+        category_ids_map[name] = new_category.id
         created_categories += 1
 
     created_payments = 0
@@ -897,7 +1284,7 @@ def import_csv(
 
         category_id = None
         if row["normalized_category"]:
-            category_id = category_ids.get(row["normalized_category"])
+            category_id = category_ids_map.get(row["normalized_category"])
         elif default_category:
             category_id = default_category.id
 
@@ -908,6 +1295,7 @@ def import_csv(
             description=row["description"],
             recipient_id=recipient_id,
             standard_category_id=category_id,
+            user_id=current_user.id,
         )
         session.add(payment_item)
         session.flush()
@@ -931,6 +1319,7 @@ def import_csv(
 @app.get("/download-invoice/{payment_item_id}")
 def download_invoice(
     payment_item_id: int,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> FileResponse:
     """Download the invoice file for a payment item."""
@@ -938,6 +1327,8 @@ def download_invoice(
     payment_item = session.get(PaymentItem, payment_item_id)
     if not payment_item:
         raise HTTPException(status_code=404, detail="Payment item not found")
+    if payment_item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this invoice")
     
     if not payment_item.invoice_path:
         raise HTTPException(status_code=404, detail="No invoice file found for this payment item")
@@ -956,6 +1347,7 @@ def download_invoice(
 @app.delete("/invoice/{payment_item_id}")
 def delete_invoice(
     payment_item_id: int,
+    current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> dict:
     """Delete the invoice file for a payment item."""
@@ -965,6 +1357,8 @@ def delete_invoice(
     payment_item = session.get(PaymentItem, payment_item_id)
     if not payment_item:
         raise HTTPException(status_code=404, detail="Payment item not found")
+    if payment_item.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to delete this invoice")
     
     if not payment_item.invoice_path:
         raise HTTPException(status_code=404, detail="No invoice file found for this payment item")
@@ -980,3 +1374,12 @@ def delete_invoice(
     session.commit()
     
     return {"message": "Invoice deleted successfully"}
+
+
+# ═══════════════════════════════════════════════════════════════════
+#  ADMIN WEBSITE  (Jinja2 server-side rendered)
+# ═══════════════════════════════════════════════════════════════════
+
+# The admin website is mounted from a separate module to keep main.py clean
+from app.admin import admin_router  # noqa: E402
+app.include_router(admin_router)

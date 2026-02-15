@@ -1,9 +1,31 @@
 # FinanceBook - Private Finance Management Application
 
-FinanceBook is a web application designed for managing private finances and cash flows. It features a modern React frontend with a FastAPI backend, utilizing state-of-the-art technologies and a clean, professional design.
+FinanceBook is a **multi-user** web application designed for managing private finances and cash flows. It features a modern React frontend with a FastAPI backend, **JWT-based authentication**, a **server-side rendered admin panel**, and per-user data isolation — all built with state-of-the-art technologies and a clean, professional design.
 
 ## Core Features (Current Implementation)
 
+*   **Authentication & User Management**:
+    *   Multi-user system with secure registration and login.
+    *   **bcrypt** password hashing with automatic salting (passwords are never stored in plaintext).
+    *   **JWT (JSON Web Token)** authentication with HS256 signing and 30-minute token expiry.
+    *   OAuth2-compatible Bearer token flow, fully integrated with Swagger UI (`/docs`).
+    *   User self-service profile management (view and update personal details, change password).
+    *   Default `admin` account auto-created on first startup with configurable initial password.
+    *   User registration automatically provisions a `standard` category type and `UNCLASSIFIED` category.
+*   **Admin Panel** (server-side rendered web UI):
+    *   Accessible at `/admin/login` with session-based authentication (signed cookies, 1-hour sessions).
+    *   **Dashboard** with real-time statistics: total users, active users, payment items, recipients, categories.
+    *   **User management**: searchable user list, edit profiles, reset passwords, activate/deactivate accounts.
+    *   Dark-themed, responsive design with modern CSS.
+    *   See [`admin.md`](admin.md) for comprehensive admin documentation.
+*   **Admin REST API**:
+    *   `GET/PUT/DELETE /admin/api/users/{user_id}` — programmatic user management for admin users.
+    *   Deactivation is a soft delete (sets `is_active = false`); no data is removed.
+*   **Per-User Data Isolation (Multi-Tenancy)**:
+    *   Every data entity (payment items, recipients, categories, category types) belongs to a specific user via `user_id`.
+    *   All API queries are scoped to the authenticated user — users cannot see or modify each other's data.
+    *   Cross-entity ownership validation (e.g., a payment item's recipient must belong to the same user).
+    *   Automatic migration: pre-existing data from the single-user era is assigned to the admin account on upgrade.
 *   **Payment Item Management**:
     *   Create, Read, Update, Delete (CRUD) operations for payment items.
     *   Each item includes amount, date/time, periodicity flag, an optional recipient, multiple categories, and optional invoice attachments.
@@ -23,13 +45,13 @@ FinanceBook is a web application designed for managing private finances and cash
     *   Define custom "Category Types" (e.g., "Spending Area", "Payment Method").
     *   Create and edit nested categories under these types with unlimited depth.
     *   Each category may optionally have an icon (PNG, JPEG, GIF, BMP, SVG) uploaded via the API.
-    *   A default `UNCLASSIFIED` category under the "standard" type is created on first run.
+    *   A default `UNCLASSIFIED` category under the "standard" type is created on first run (per user).
     *   Support for one category per type per payment item (enforced validation).
     *   Hierarchical category filtering with automatic descendant expansion.
 *   **Recipient Management**:
     *   Create, read, update recipients (persons or organizations).
     *   Each recipient has a name and optional address field.
-    *   Name normalization and uniqueness validation.
+    *   Name normalization and uniqueness validation (scoped per user).
 *   **Filtering & Pagination**:
     *   Filter payment items by "All", "Incomes", or "Expenses".
     *   Filter by one or more categories with OR logic (items matching ANY selected category).
@@ -37,7 +59,7 @@ FinanceBook is a web application designed for managing private finances and cash
     *   Single-row pagination bar anchored to the bottom of the viewport with custom blue arrow icons for Previous/Next navigation.
     *   Customizable items per page and "Show All" functionality.
 *   **Data Import/Export**:
-    *   CSV import functionality for bulk data import.
+    *   CSV import functionality for bulk data import (imported data is assigned to the authenticated user).
     *   CSV export to download all payment data.
     *   Automatic creation of recipients and categories during import.
     *   Validation of CSV format, data types, and field lengths.
@@ -57,37 +79,61 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
 ### Backend (`/app` directory)
 
 *   **`main.py`**: Contains all FastAPI routes and business logic:
+    *   **Authentication**: `POST /auth/login`, `POST /auth/register`, `GET /auth/me`, `PUT /auth/me`
+    *   **Admin API**: `GET /admin/api/users`, `GET /admin/api/users/{user_id}`, `PUT /admin/api/users/{user_id}`, `DELETE /admin/api/users/{user_id}`
     *   **Payment Items**: `POST /payment-items`, `GET /payment-items`, `GET /payment-items/{item_id}`, `PUT /payment-items/{item_id}`, `DELETE /payment-items/{item_id}`
     *   **Categories**: `POST /categories`, `GET /categories`, `GET /categories/{category_id}`, `PUT /categories/{category_id}`, `GET /categories/{category_id}/tree`, `GET /categories/{category_id}/descendants`, `GET /categories/by-type/{type_id}`
     *   **Category Types**: `POST /category-types`, `GET /category-types`
     *   **Recipients**: `POST /recipients`, `GET /recipients`, `GET /recipients/{recipient_id}`, `PUT /recipients/{recipient_id}`
     *   **File Uploads**: `POST /uploadicon/`, `GET /download_static/{filename}`, `POST /upload-invoice/{payment_item_id}`, `GET /download-invoice/{payment_item_id}`, `DELETE /invoice/{payment_item_id}`
     *   **Data Import**: `POST /import-csv`
+    *   All data endpoints require JWT authentication and enforce per-user data isolation.
     *   Includes comprehensive logging, validation, and error handling.
-    *   Automatic initialization of default data (standard category type and UNCLASSIFIED category).
+    *   Automatic initialization of default admin user, standard category type, and UNCLASSIFIED category.
+    *   Automatic migration of orphaned records (pre-multi-user data) to the admin account.
+*   **`auth.py`**: Authentication and authorization module:
+    *   `hash_password()` / `verify_password()` — bcrypt password hashing.
+    *   `create_access_token()` — JWT token creation with configurable expiry.
+    *   `get_current_user` / `get_current_admin` — FastAPI injectable dependencies for route protection.
+    *   OAuth2 password bearer scheme for Swagger UI integration.
+*   **`admin.py`**: Admin web panel router (Jinja2 server-side rendering):
+    *   Login/logout with signed session cookies (`itsdangerous`).
+    *   Dashboard with application statistics.
+    *   User list with search, user detail/edit forms, password reset, activate/deactivate.
 *   **`models.py`**: Defines SQLModel classes for database tables and API schemas:
+    *   `User`, `UserCreate`, `UserRead`, `UserUpdate` — user account management.
     *   `PaymentItem`, `PaymentItemCreate`, `PaymentItemRead`, `PaymentItemUpdate`
     *   `Category`, `CategoryUpdate`, `CategoryType`
     *   `Recipient`, `RecipientUpdate`
     *   `PaymentItemCategoryLink` (many-to-many association table)
+    *   All data entities include a `user_id` foreign key for multi-tenancy.
     *   Includes comprehensive documentation and type hints.
-*   **`database.py`**: Manages PostgreSQL database connection and table creation using SQLModel.
-*   **`constants.py`**: Application-wide constants for validation (max lengths for text fields).
-*   **`.env`**: Environment configuration file containing the DATABASE_URL for PostgreSQL connection.
+*   **`database.py`**: Manages PostgreSQL database connection, table creation, and schema migrations using SQLModel.
+    *   Automatic migration: adds `user_id` columns to existing tables on upgrade.
+*   **`constants.py`**: Application-wide constants for validation (max lengths for text fields, including user-related fields).
+*   **`/templates`**: Jinja2 HTML templates for the admin web panel (`base.html`, `login.html`, `dashboard.html`, `users.html`, `user_detail.html`).
+*   **`/static`**: Static assets for the admin panel (`admin.css` — dark-themed, responsive CSS).
+*   **`.env`**: Environment configuration file containing `DATABASE_URL`, and optionally `JWT_SECRET_KEY` and `ADMIN_DEFAULT_PASSWORD`.
 *   **`/invoices`**: Directory for storing uploaded invoice files (auto-created).
 
 ### Frontend (`/frontend` directory)
 
 *   **`src/`**: Contains all React application source code.
-    *   **`main.tsx`**: Entry point setting up React Query and React Router.
-    *   **`App.tsx`**: Root component defining global layout, routes, and navigation.
-    *   **`api/hooks.ts`**: Custom React Query hooks for API interactions with automatic caching and refetching.
+    *   **`main.tsx`**: Entry point setting up React Query, React Router, and `AuthProvider`.
+    *   **`App.tsx`**: Root component with authentication gating — unauthenticated users see only the login page; authenticated users see the full app with NavigationBar and routes.
+    *   **`context/AuthContext.tsx`**: React Context providing global authentication state management:
+        *   `login(username, password, rememberMe)` — authenticates via `POST /auth/login` and fetches user profile.
+        *   `logout()` — clears stored tokens and React Query cache.
+        *   "Stay logged in" — stores JWT in `localStorage` (persistent) or `sessionStorage` (tab-scoped).
+        *   On mount, validates any stored token against `GET /auth/me`.
+    *   **`api/hooks.ts`**: Custom React Query hooks for API interactions with automatic caching and refetching. Includes JWT auth interceptors that attach `Authorization: Bearer` headers to all requests and handle 401 responses by redirecting to login.
     *   **`components/`**: Reusable UI components:
-        *   **`NavigationBar.tsx`**: Top navigation bar with filtering options and menu trigger.
+        *   **`NavigationBar.tsx`**: Top navigation bar with filtering options, CSV import/export, ADD button, and a blue **Logout** button at the far right.
         *   **`Footer.tsx`**: Bottom pagination controls with page navigation and items-per-page selector.
         *   **`PaymentItemForm.tsx`**: Form for creating and editing payment items.
         *   **`ConfirmationDialog.tsx`**: Reusable confirmation dialog component.
     *   **`pages/`**: Page components:
+        *   **`LoginPage.tsx`**: Dark-themed login page with username/password fields, "Stay logged in" checkbox, error display, and fade-in animation. No NavigationBar is shown on this page.
         *   **`SummaryPage.tsx`**: Main page displaying payment items with filtering and pagination.
         *   **`StatisticsPage.tsx`**: Financial charts page with balance-over-time area chart and income/expense pie charts.
         *   **`AddItemPage.tsx`** / **`AddSuccessPage.tsx`**: Create new payment items and show confirmation.
@@ -95,7 +141,7 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
         *   **`CategoryManagerPage.tsx`**: Manage category types.
         *   **`CategoryEditPage.tsx`**: Full CRUD interface for categories including icon upload.
         *   **`NotFoundPage.tsx`**: 404 error page.
-    *   **`types.ts`**: TypeScript interfaces mirroring backend models.
+    *   **`types.ts`**: TypeScript interfaces mirroring backend models, including `UserRead` for authenticated user profiles.
     *   **`constants/textLimits.ts`**: Frontend validation constants matching backend limits.
     *   **`styles/globalStyle.ts`**: Global CSS styles and theme variables.
     *   **`assets/`**: Static assets (SVG icons for pagination arrows, sort indicators, and periodic payment indicator).
@@ -108,7 +154,8 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
 *   **`icons/`**: Directory for storing category icon files (auto-created).
 *   **`Dockerfile`**: Docker configuration for PostgreSQL database.
 *   **`run_app.sh`**: Automated setup and execution script.
-*   **`requirements.txt`**: Python dependencies including FastAPI, Uvicorn, SQLModel, psycopg2-binary, and python-multipart.
+*   **`requirements.txt`**: Python dependencies including FastAPI, Uvicorn, SQLModel, psycopg2-binary, python-multipart, python-jose, bcrypt, Jinja2, and itsdangerous.
+*   **`admin.md`**: Comprehensive admin documentation for the multi-user authentication system (security architecture, API reference, admin panel guide, troubleshooting).
 
 ## System Requirements
 
@@ -148,10 +195,20 @@ Navigate to the project root directory.
 **Setup:**
 
 1.  **Create and configure the .env file:**
-    Create a `.env` file with the database connection string:
+    Create a `.env` file with the database connection string and security settings:
     ```bash
-    echo "DATABASE_URL=postgresql+psycopg2://yourself:secretPassword@localhost/financebook" > .env
+    cat > .env << 'EOF'
+    DATABASE_URL=postgresql+psycopg2://yourself:secretPassword@localhost/financebook
+    JWT_SECRET_KEY=your-very-long-random-secret-key-here
+    ADMIN_DEFAULT_PASSWORD=MySecureAdminPassword123
+    EOF
     ```
+    
+    | Variable | Required | Default | Description |
+    |----------|----------|---------|-------------|
+    | `DATABASE_URL` | No | `sqlite:///./financebook.db` | Database connection string |
+    | `JWT_SECRET_KEY` | **Recommended** | Auto-generated | Secret key for signing JWT tokens. Set this in production! |
+    | `ADMIN_DEFAULT_PASSWORD` | No | `admin` | Initial password for the auto-created admin account |
 
 2.  **Create a virtual environment (recommended):**
     ```bash
@@ -180,6 +237,8 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 The backend API will be available at `http://localhost:8000`. You can access the OpenAPI documentation at `http://localhost:8000/docs`.
 
+On first startup, a default **admin** account is created automatically (username: `admin`, password: from `ADMIN_DEFAULT_PASSWORD` or `admin`). The **admin panel** is available at `http://localhost:8000/admin/login`.
+
 ### 2. Frontend (React with Vite)
 
 Navigate to the `frontend` directory.
@@ -203,17 +262,27 @@ The frontend application will be available at `http://localhost:5173`. API reque
 
 ### Backend Logic
 
+*   **Authentication (`auth.py`)**: Implements a layered security stack:
+    *   Passwords hashed with **bcrypt** (adaptive cost, automatic salting).
+    *   JWT tokens issued on login via `python-jose` (HS256, 30-minute expiry).
+    *   Two FastAPI dependencies: `get_current_user` (validates JWT) and `get_current_admin` (also checks `is_admin` flag).
+    *   All data endpoints inject `get_current_user` for automatic authentication.
+*   **Admin Panel (`admin.py`)**: Server-side rendered Jinja2 templates with signed cookie sessions (`itsdangerous`). Separate from the JWT auth flow — admin sessions use cookies with a 1-hour max age.
 *   **Data Models (`models.py`)**: SQLModel combines Pydantic (validation/serialization) and SQLAlchemy (database ORM). Relationships include:
+    *   One-to-many: `User` → `PaymentItem`, `User` → `Recipient`, `User` → `Category`, `User` → `CategoryType`
     *   One-to-many: `Recipient` → `PaymentItem`, `CategoryType` → `Category`
     *   Many-to-many: `PaymentItem` ↔ `Category` via `PaymentItemCategoryLink`
     *   Self-referencing: `Category.parent_id` for hierarchical categories
+*   **Multi-Tenancy**: Every data query filters by `user_id == current_user.id`. Create operations set `user_id` from the JWT token. Update/delete operations verify ownership and return `403 Forbidden` for unauthorized access.
+*   **Schema Migration (`database.py`)**: On startup, automatically adds missing `user_id` columns to existing tables (idempotent). Orphaned records (from pre-multi-user era) are assigned to the admin account.
 *   **API Endpoints (`main.py`)**: FastAPI automatically validates request bodies and serializes responses using the SQLModel classes. Each endpoint:
-    1.  Receives a database `Session` via dependency injection.
-    2.  Validates input data using Pydantic models.
-    3.  Uses SQLModel's query interface for database operations.
-    4.  Commits changes and returns updated objects as JSON.
-*   **Validation & Normalization**: Names are normalized (whitespace collapsed), uniqueness is enforced, and field lengths are validated against constants.
-*   **File Management**: Uploaded files (icons and invoices) are stored in dedicated directories with unique filenames. Files are automatically deleted when associated records are removed.
+    1.  Authenticates the user via JWT (injected `get_current_user` dependency).
+    2.  Receives a database `Session` via dependency injection.
+    3.  Validates input data using Pydantic models.
+    4.  Scopes queries to the authenticated user's data.
+    5.  Commits changes and returns updated objects as JSON.
+*   **Validation & Normalization**: Names are normalized (whitespace collapsed), uniqueness is enforced (per user), and field lengths are validated against constants.
+*   **File Management**: Uploaded files (icons and invoices) are stored in dedicated directories with unique filenames. Files are automatically deleted when associated records are removed. Invoice uploads/downloads enforce ownership checks.
 *   **Category Filtering**: When filtering by categories, the backend automatically expands the selection to include all descendant categories, making parent category selection intuitive.
 
 ### Frontend Logic
@@ -230,11 +299,28 @@ The frontend application will be available at `http://localhost:5173`. API reque
 
 ## Key Features Explained
 
+### Authentication & Security
+- **bcrypt** password hashing with adaptive cost factor and automatic salting
+- **JWT** access tokens (HS256, 30-minute expiry) for API authentication
+- OAuth2-compatible Bearer token flow with Swagger UI integration
+- Configurable `JWT_SECRET_KEY` (auto-generated if not set, but should be fixed in production)
+- Deactivated accounts are immediately locked out; active tokens become invalid
+- Minimum password length: 6 characters (enforced on registration, update, and admin reset)
+
+### Admin Panel
+- Dark-themed, responsive server-side rendered web UI at `/admin`
+- Session-based authentication with signed cookies (separate from JWT)
+- Dashboard with real-time statistics across all users
+- User management: search, edit profiles, reset passwords, activate/deactivate
+- Safety guard: admins cannot deactivate their own account
+- For full documentation, see [`admin.md`](admin.md)
+
 ### Invoice Management
 - Upload invoices (PDF, images, documents) up to 25MB per payment item
 - Automatic file cleanup when payment items are deleted
 - Download invoices via dedicated endpoint
 - Delete invoices independently of payment items
+- All invoice operations enforce ownership checks (user can only access their own invoices)
 
 ### Statistics & Charts
 - **Balance Over Time**: Running cumulative balance plotted as an area chart with gradient fill
@@ -251,6 +337,7 @@ The frontend application will be available at `http://localhost:5173`. API reque
 - One category per type per payment item (enforced)
 - Icon support for visual identification
 - Automatic descendant expansion in filters
+- Categories are scoped per user (each user has their own category tree)
 
 ### Periodic Payment Indicator
 - Payment items marked as periodic display a blue circular-arrow icon next to their date
@@ -264,8 +351,8 @@ The frontend application will be available at `http://localhost:5173`. API reque
 - Persistent across filter changes
 
 ### Data Import/Export
-- CSV import with automatic entity creation
+- CSV import with automatic entity creation (assigned to the authenticated user)
 - CSV export to download all payment data
 - Validation of data types and field lengths
-- Deduplication of recipients and categories
+- Deduplication of recipients and categories (scoped per user)
 - Batch processing with transaction safety

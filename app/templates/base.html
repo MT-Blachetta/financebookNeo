@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}FinanceBook Admin{% endblock %}</title>
+    <link rel="stylesheet" href="/static/admin.css">
+</head>
+<body>
+    {% block nav %}
+    {% if admin is defined and admin %}
+    <nav class="admin-nav">
+        <div class="nav-brand">
+            <span class="nav-logo">📊</span>
+            <span class="nav-title">FinanceBook</span>
+            <span class="nav-badge">Admin</span>
+        </div>
+        <div class="nav-links">
+            <a href="/admin/dashboard" class="nav-link">Dashboard</a>
+            <a href="/admin/users" class="nav-link">Users</a>
+            <span class="nav-separator">|</span>
+            <span class="nav-user">{{ admin.prename }} {{ admin.surname }}</span>
+            <a href="/admin/logout" class="nav-link nav-logout">Logout</a>
+        </div>
+    </nav>
+    {% endif %}
+    {% endblock %}
+
+    <main class="content">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="admin-footer">
+        <p>FinanceBook Admin Panel &copy; 2026</p>
+    </footer>
+</body>
+</html>

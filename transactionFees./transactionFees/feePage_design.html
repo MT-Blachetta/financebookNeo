@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transaction Fee Configurator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/lucide/0.263.0/lucide.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .glass-header { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(12px); border-bottom: 1px solid #e2e8f0; }
+        .chart-grid { background-image: radial-gradient(#e2e8f0 1px, transparent 1px); background-size: 20px 20px; }
+    </style>
+</head>
+<body class="text-slate-900">
+
+    <header class="glass-header sticky top-0 z-50 w-full px-6 py-4 flex items-center justify-between">
+        <button class="flex items-center gap-2 text-slate-600 hover:text-indigo-600 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+            <span class="font-medium">Back</span>
+        </button>
+        
+        <h1 class="text-lg font-bold tracking-tight text-slate-800">Transaction Fees Configuration</h1>
+        
+        <div class="relative">
+            <select class="appearance-none bg-slate-100 border border-slate-200 rounded-lg px-4 py-2 pr-10 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500 cursor-pointer">
+                <option>Michael</option>
+                <option>Sarah</option>
+                <option>Enterprise Account A</option>
+            </select>
+            <div class="absolute right-3 top-2.5 pointer-events-none text-slate-400">
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-8 grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <div class="lg:col-span-7 flex flex-col gap-6">
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <div class="flex items-center justify-between mb-8">
+                    <div class="space-y-1">
+                        <label class="text-xs font-semibold uppercase tracking-wider text-slate-500">Maximal Transaction Fee</label>
+                        <div class="flex items-center gap-3">
+                            <input type="number" step="0.01" value="0.10" class="w-24 text-2xl font-bold text-indigo-600 bg-transparent border-b-2 border-indigo-100 focus:border-indigo-500 focus:outline-none" />
+                            <span class="text-slate-400 font-medium">fraction</span>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded">transaction fees starting at 100 €</span>
+                    </div>
+                </div>
+
+                <div class="relative h-[400px] w-full border-l-2 border-b-2 border-slate-300 ml-10 mb-10 chart-grid group cursor-crosshair">
+                    <div class="absolute -left-12 top-0 h-full flex flex-col justify-between text-[10px] font-bold text-slate-400 py-1">
+                        <span>0.10</span><span>0.08</span><span>0.06</span><span>0.04</span><span>0.02</span><span>0.00</span>
+                    </div>
+                    <div class="absolute -bottom-8 left-0 w-full flex justify-between text-[10px] font-bold text-slate-400 px-1">
+                        <span>0.0</span><span>0.2</span><span>0.4</span><span>0.6</span><span>0.8</span><span>1.0</span>
+                    </div>
+                    <div class="absolute -left-16 top-1/2 -rotate-90 origin-center text-xs font-semibold text-slate-500 uppercase tracking-widest">
+                        Relative Fee
+                    </div>
+                    <div class="absolute -bottom-14 left-1/2 -translate-x-1/2 text-xs font-semibold text-slate-500 uppercase tracking-widest">
+                        Payment Frequency (y)
+                    </div>
+
+                    <svg class="absolute inset-0 w-full h-full">
+                        <path d="M 0 380 Q 150 300 300 150 T 600 50" fill="none" stroke="#6366f1" stroke-width="3" />
+                        <circle cx="300" cy="150" r="5" fill="#6366f1" />
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <div class="lg:col-span-5 flex flex-col gap-6">
+            
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
+                    <h2 class="font-bold text-slate-700">Payment Amounts (x)</h2>
+                    <span class="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">Click row to edit</span>
+                </div>
+                <div class="max-h-80 overflow-y-auto">
+                    <table class="w-full text-left border-collapse">
+                        <tbody class="divide-y divide-slate-50">
+                            <tr class="hover:bg-indigo-50 transition-colors cursor-pointer group">
+                                <td class="px-6 py-3 font-mono text-slate-600">0 €</td>
+                            </tr>
+                            <tr class="hover:bg-indigo-50 transition-colors cursor-pointer group">
+                                <td class="px-6 py-3 font-mono text-slate-600">15 €</td>
+                            </tr>
+                            <tr class="bg-indigo-600 text-white shadow-inner">
+                                <td class="px-6 py-3 font-mono font-bold">100 €</td>
+                            </tr>
+                            <tr class="hover:bg-indigo-50 transition-colors cursor-pointer group">
+                                <td class="px-6 py-3 font-mono text-slate-600">308 €</td>
+                            </tr>
+                            <tr class="hover:bg-indigo-50 transition-colors cursor-pointer group">
+                                <td class="px-6 py-3 font-mono text-slate-600">500 €</td>
+                            </tr>
+                            <tr class="hover:bg-indigo-50 transition-colors cursor-pointer group">
+                                <td class="px-6 py-3 font-mono text-slate-600">1000 €</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <button class="w-full py-4 bg-slate-50 text-indigo-600 font-bold text-sm hover:bg-indigo-50 transition-colors border-t border-slate-100 flex items-center justify-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                    ADD NEW MINIMUM LEVEL
+                </button>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 space-y-4">
+                <div class="space-y-1">
+                    <label class="text-xs font-bold text-slate-500 uppercase tracking-wider">Fee Equation</label>
+                    <p class="text-[10px] text-slate-400">Use variables (x, y) and operators (+, -, *, **, ())</p>
+                </div>
+                <textarea 
+                    placeholder="(x * 0.02) + (y ** 2)"
+                    class="w-full h-24 p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none"
+                ></textarea>
+                <button class="w-full py-3 bg-indigo-600 text-white rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 active:scale-[0.98] transition-all">
+                    Evaluate & Update Plot
+                </button>
+            </div>
+
+        </div>
+    </main>
+</body>
+</html>

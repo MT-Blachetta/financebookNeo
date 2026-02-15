@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Users - FinanceBook Admin{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>User Management</h1>
+    <p class="page-subtitle">{{ users|length }} user{{ 's' if users|length != 1 else '' }} registered</p>
+</div>
+
+<div class="toolbar">
+    <form method="GET" action="/admin/users" class="search-form">
+        <input type="text" name="search" value="{{ search }}" placeholder="Search by username, surname, or prename..."
+            class="search-input">
+        <button type="submit" class="btn btn-secondary">Search</button>
+        {% if search %}
+        <a href="/admin/users" class="btn btn-ghost">Clear</a>
+        {% endif %}
+    </form>
+</div>
+
+<div class="table-container">
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Name</th>
+                <th>City</th>
+                <th>Phone</th>
+                <th>Role</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr class="{{ 'inactive-row' if not user.is_active }}">
+                <td class="td-mono">{{ user.id }}</td>
+                <td class="td-bold">{{ user.username }}</td>
+                <td>{{ user.prename }} {{ user.surname }}</td>
+                <td>{{ user.city or '—' }}</td>
+                <td>{{ user.phone or '—' }}</td>
+                <td>
+                    {% if user.is_admin %}
+                    <span class="badge badge-admin">Admin</span>
+                    {% else %}
+                    <span class="badge badge-user">User</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if user.is_active %}
+                    <span class="badge badge-active">Active</span>
+                    {% else %}
+                    <span class="badge badge-inactive">Inactive</span>
+                    {% endif %}
+                </td>
+                <td class="td-date">{{ user.created_at.strftime('%Y-%m-%d') }}</td>
+                <td>
+                    <a href="/admin/users/{{ user.id }}" class="btn btn-sm btn-secondary">Edit</a>
+                </td>
+            </tr>
+            {% else %}
+            <tr>
+                <td colspan="9" class="td-empty">No users found</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}

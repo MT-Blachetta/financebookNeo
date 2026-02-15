@@ -17,6 +17,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
 
 import { GlobalStyle } from './styles/globalStyle'; // global CSS-in-JS reset
+import { AuthProvider } from './context/AuthContext';
 import App from './App';
 
 
@@ -49,7 +50,7 @@ const container = document.getElementById('root');
 if (!container) {
   throw new Error(
     "Root container with id='root' was not found in index.html. " +
-      'Did Vite inject the template correctly ?',
+    'Did Vite inject the template correctly ?',
   );
 }
 
@@ -59,7 +60,9 @@ ReactDOM.createRoot(container).render(
       <BrowserRouter>
         {/* Global CSS-reset & design-tokens */}
         <GlobalStyle />
-        <App />
+        <AuthProvider>
+          <App />
+        </AuthProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,

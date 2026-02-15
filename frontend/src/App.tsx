@@ -1,9 +1,9 @@
 /**
  * Root component that defines the global application layout and routes.
  *
- * We keep the shell deliberately minimal:
- *   - Top-level navigation (persistent)
- *   – <Outlet /> for nested routes
+ * Authentication gating:
+ *   - Unauthenticated users see only the LoginPage (no NavigationBar)
+ *   - Authenticated users see the full app with NavigationBar + Routes
  *
  * Individual screens such as the "Summary" page are lazy-loaded to keep the
  * initial bundle small.  React-Router will automatically code-split when using
@@ -15,6 +15,7 @@ import { Routes, Route, Navigate, useNavigate, useSearchParams } from 'react-rou
 import styled from 'styled-components';
 
 import { NavigationBar, ViewFilter } from './components/NavigationBar';
+import { useAuth } from './context/AuthContext';
 
 
 // lazy-loaded route modules
@@ -22,6 +23,7 @@ import { NavigationBar, ViewFilter } from './components/NavigationBar';
 // lazy-loaded page components for better initial load performance.
 // React.lazy and Suspense handle code-splitting and loading states.
 const SummaryPage = lazy(() => import('./pages/SummaryPage'));
+const LoginPage = lazy(() => import('./pages/LoginPage'));
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'));
 const AddItemPage = lazy(() => import('./pages/AddItemPage')); // page for creating new payment items
 const AddSuccessPage = lazy(() => import('./pages/AddSuccessPage')); // success page after creating payment
@@ -52,11 +54,23 @@ const Content = styled.main`
   color: #eaeaea; /* light grey text for contrast on black */
 `;
 
+/** Full-screen loading spinner shown while auth state is being determined. */
+const LoadingScreen = styled.div`
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100dvh;
+  background: #000;
+  color: var(--color-text-secondary);
+  font-size: 1.1rem;
+`;
+
 
 // Component
 
 const App: React.FC = () => {
   const navigate = useNavigate();
+  const { token, isLoading, logout } = useAuth();
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   // get current filter from URL to show active state in navigation
@@ -104,6 +118,15 @@ const App: React.FC = () => {
   }, [navigate]);
 
   /**
+   * Handles the Logout button click from the NavigationBar.
+   * Clears auth state and redirects to login.
+   */
+  const handleLogout = useCallback(() => {
+    logout();
+    navigate('/login', { replace: true });
+  }, [logout, navigate]);
+
+  /**
    * A simple placeholder component for the navigation drawer.
    * In a real application, this would be a more robust and styled component,
    * potentially using a UI library or custom styling.
@@ -135,6 +158,24 @@ const App: React.FC = () => {
   );
 
 
+  // ── Loading state while auth is being initialized ────────────────
+  if (isLoading) {
+    return <LoadingScreen>Loading…</LoadingScreen>;
+  }
+
+  // ── Unauthenticated: show login only ─────────────────────────────
+  if (!token) {
+    return (
+      <Suspense fallback={<LoadingScreen>Loading…</LoadingScreen>}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </Suspense>
+    );
+  }
+
+  // ── Authenticated: full app ──────────────────────────────────────
   return (
     <Wrapper>
       <NavigationBar
@@ -142,6 +183,7 @@ const App: React.FC = () => {
         onChange={handleGlobalNavFilterChange}
         onMenu={handleMenuClick}
         onAdd={handleAddClick}
+        onLogout={handleLogout}
       />
       <NavigationDrawer />
 
@@ -161,6 +203,9 @@ const App: React.FC = () => {
             <Route path="/categories" element={<CategoryEditPage />} />
             <Route path="/category-types" element={<CategoryManagerPage />} />
             <Route path="/statistics" element={<StatisticsPage />} />
+
+            {/* Redirect /login to home when already authenticated */}
+            <Route path="/login" element={<Navigate to="/" replace />} />
 
             {/* Fallback routes for 404 and unmatched paths */}
             <Route path="/404" element={<NotFoundPage />} />

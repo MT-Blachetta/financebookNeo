@@ -10,6 +10,24 @@
  *  production data depends on these contracts.
  */
 
+export interface UserRead {
+  id: number;
+  username: string;
+  surname: string;
+  prename: string;
+  birth_date?: string | null;
+  phone?: string | null;
+  road?: string | null;
+  house_number?: string | null;
+  region?: string | null;
+  postal?: string | null;
+  city?: string | null;
+  state?: string | null;
+  is_admin: boolean;
+  is_active: boolean;
+  created_at: string;
+}
+
 export interface Recipient {
   id: number;
   name: string;
