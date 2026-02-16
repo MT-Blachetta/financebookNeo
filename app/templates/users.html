@@ -7,7 +7,7 @@
     <p class="page-subtitle">{{ users|length }} user{{ 's' if users|length != 1 else '' }} registered</p>
 </div>
 
-<div class="toolbar">
+<div class="toolbar toolbar-split">
     <form method="GET" action="/admin/users" class="search-form">
         <input type="text" name="search" value="{{ search }}" placeholder="Search by username, surname, or prename..."
             class="search-input">
@@ -16,6 +16,7 @@
         <a href="/admin/users" class="btn btn-ghost">Clear</a>
         {% endif %}
     </form>
+    <a href="/admin/users/create" class="btn btn-primary">+ Create User</a>
 </div>
 
 <div class="table-container">

@@ -174,10 +174,128 @@ def admin_users_list(
     })
 
 
+@admin_router.get("/users/create", response_class=HTMLResponse)
+def admin_user_create_page(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Render the create user form."""
+    _require_admin(request, session)
+    return templates.TemplateResponse("user_create.html", {
+        "request": request,
+        "admin": _require_admin(request, session),
+        "form": {},
+        "error": None,
+    })
+
+
+@admin_router.post("/users/create", response_class=HTMLResponse)
+def admin_user_create_submit(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    surname: str = Form(...),
+    prename: str = Form(...),
+    phone: str = Form(""),
+    birth_date: str = Form(""),
+    road: str = Form(""),
+    house_number: str = Form(""),
+    region: str = Form(""),
+    postal: str = Form(""),
+    city: str = Form(""),
+    state: str = Form(""),
+    is_admin: str = Form("off"),
+    is_active: str = Form("on"),
+    session: Session = Depends(get_session),
+):
+    """Process the create user form."""
+    admin = _require_admin(request, session)
+
+    # Collect form data for re-rendering on error
+    form_data = {
+        "username": username, "prename": prename, "surname": surname,
+        "phone": phone, "birth_date": birth_date, "road": road,
+        "house_number": house_number, "region": region, "postal": postal,
+        "city": city, "state": state,
+        "is_admin": is_admin == "on", "is_active": is_active == "on",
+    }
+
+    def _render_error(msg: str):
+        return templates.TemplateResponse("user_create.html", {
+            "request": request, "admin": admin, "form": form_data, "error": msg,
+        })
+
+    # Validate
+    clean_username = username.strip()
+    if not clean_username:
+        return _render_error("Username cannot be empty")
+    if session.exec(select(User).where(User.username == clean_username)).first():
+        return _render_error("Username already taken")
+    if len(password) < 6:
+        return _render_error("Password must be at least 6 characters")
+    if not surname.strip() or not prename.strip():
+        return _render_error("First name and last name are required")
+
+    # Parse optional date
+    parsed_birth_date = None
+    if birth_date.strip():
+        try:
+            from datetime import date as date_type
+            parsed_birth_date = date_type.fromisoformat(birth_date.strip())
+        except ValueError:
+            return _render_error("Invalid date format")
+
+    # Create user
+    new_user = User(
+        username=clean_username,
+        hashed_password=hash_password(password),
+        surname=surname.strip(),
+        prename=prename.strip(),
+        birth_date=parsed_birth_date,
+        phone=phone.strip() or None,
+        road=road.strip() or None,
+        house_number=house_number.strip() or None,
+        region=region.strip() or None,
+        postal=postal.strip() or None,
+        city=city.strip() or None,
+        state=state.strip() or None,
+        is_admin=is_admin == "on",
+        is_active=is_active == "on",
+    )
+    session.add(new_user)
+    session.commit()
+    session.refresh(new_user)
+
+    # Create default category type and UNCLASSIFIED category
+    standard_type = CategoryType(
+        name="standard",
+        description="Default category type for basic expense/income classification",
+        user_id=new_user.id,
+    )
+    session.add(standard_type)
+    session.commit()
+    session.refresh(standard_type)
+
+    unclassified = Category(
+        name="UNCLASSIFIED",
+        type_id=standard_type.id,
+        parent_id=None,
+        user_id=new_user.id,
+    )
+    session.add(unclassified)
+    session.commit()
+
+    return RedirectResponse(
+        url=f"/admin/users/{new_user.id}?success=User+created+successfully",
+        status_code=302,
+    )
+
+
 @admin_router.get("/users/{user_id}", response_class=HTMLResponse)
 def admin_user_detail(
     user_id: int,
     request: Request,
+    success: str = "",
     session: Session = Depends(get_session),
 ):
     """User detail / edit form."""
@@ -205,7 +323,7 @@ def admin_user_detail(
         "payment_count": payment_count,
         "recipient_count": recipient_count,
         "category_count": category_count,
-        "success": None,
+        "success": success or None,
         "error": None,
     })
 
