@@ -240,10 +240,10 @@ def admin_user_create_submit(
     parsed_birth_date = None
     if birth_date.strip():
         try:
-            from datetime import date as date_type
-            parsed_birth_date = date_type.fromisoformat(birth_date.strip())
+            from datetime import datetime
+            parsed_birth_date = datetime.strptime(birth_date.strip(), "%d.%m.%Y").date()
         except ValueError:
-            return _render_error("Invalid date format")
+            return _render_error("Invalid date format (DD.MM.YYYY required)")
 
     # Create user
     new_user = User(
