@@ -1,6 +1,6 @@
 # FinanceBook - Private Finance Management Application
 
-FinanceBook is a **multi-user** web application designed for managing private finances and cash flows. It features a modern React frontend with a FastAPI backend, **JWT-based authentication**, a **server-side rendered admin panel**, and per-user data isolation — all built with state-of-the-art technologies and a clean, professional design.
+FinanceBook is a **multi-user** web application designed for managing private finances and cash flows. It features a modern React frontend with a FastAPI backend, **JWT-based authentication**, a **server-side rendered admin panel**, **configurable transaction fees**, and per-user data isolation — all built with state-of-the-art technologies and a clean, professional design.
 
 ## Core Features (Current Implementation)
 
@@ -16,11 +16,22 @@ FinanceBook is a **multi-user** web application designed for managing private fi
     *   Accessible at `/admin/login` with session-based authentication (signed cookies, 1-hour sessions).
     *   **Dashboard** with real-time statistics: total users, active users, payment items, recipients, categories.
     *   **User management**: searchable user list, edit profiles, reset passwords, activate/deactivate accounts.
+    *   **Transaction fee configuration**: interactive chart-based fee plan editor per user.
     *   Dark-themed, responsive design with modern CSS.
     *   See [`admin.md`](admin.md) for comprehensive admin documentation.
 *   **Admin REST API**:
     *   `GET/PUT/DELETE /admin/api/users/{user_id}` — programmatic user management for admin users.
+    *   `GET/PUT /admin/api/fee-plan/{user_id}` — read/save per-user fee plan configuration.
+    *   `POST /admin/api/fee-plan/{user_id}/validate-formula` — validate a fee formula expression.
     *   Deactivation is a soft delete (sets `is_active = false`); no data is removed.
+*   **Transaction Fees**:
+    *   Configurable per-user fee plans with two modes: **Amount Table** (interval-based chart regression) and **Formula** (mathematical expression).
+    *   Fees are automatically computed and applied when payment items are created, recomputed on update, and refunded on deletion.
+    *   **Income** (positive amount): fee is subtracted from the stored value (e.g., 100€ → 99.99€ after 0.01€ fee).
+    *   **Expenses** (negative amount): fee is subtracted, increasing the absolute value (e.g., -100€ → -100.01€ after 0.01€ fee).
+    *   Fee is capped at 100% of the payment amount; fees below 0.01€ (after rounding) are not applied.
+    *   Non-retroactive: fee plan changes only affect future transactions.
+    *   All applied fees are recorded in `TransactionFeeRecord` for accurate refunds and recomputation.
 *   **Per-User Data Isolation (Multi-Tenancy)**:
     *   Every data entity (payment items, recipients, categories, category types) belongs to a specific user via `user_id`.
     *   All API queries are scoped to the authenticated user — users cannot see or modify each other's data.
@@ -100,18 +111,27 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
     *   Login/logout with signed session cookies (`itsdangerous`).
     *   Dashboard with application statistics.
     *   User list with search, user detail/edit forms, password reset, activate/deactivate.
+    *   Fee configuration page and API endpoints (`GET/PUT /api/fee-plan/{user_id}`, `POST /api/fee-plan/{user_id}/validate-formula`).
+*   **`fee_engine.py`**: Transaction fee computation engine:
+    *   `compute_fee()` — computes the fee for a given payment amount based on the user's fee plan.
+    *   `safe_eval_formula()` — AST-based safe evaluation of mathematical expressions (no `eval()`).
+    *   `get_payment_frequency()` — calculates the fraction of a user's payments in a given amount range.
+    *   `compute_regression_coefficients()` — polynomial regression with corner cases for 0, 1, and 2 points.
+    *   `create_fee_record()`, `refund_fee_record()`, `recompute_fee_record()` — high-level CRUD helpers.
 *   **`models.py`**: Defines SQLModel classes for database tables and API schemas:
     *   `User`, `UserCreate`, `UserRead`, `UserUpdate` — user account management.
     *   `PaymentItem`, `PaymentItemCreate`, `PaymentItemRead`, `PaymentItemUpdate`
     *   `Category`, `CategoryUpdate`, `CategoryType`
     *   `Recipient`, `RecipientUpdate`
     *   `PaymentItemCategoryLink` (many-to-many association table)
+    *   `TransactionFeePlan` — per-user fee configuration (mode, formula, amount table, interval data).
+    *   `TransactionFeeRecord` — fee applied to each payment item (fee amount, original amount).
     *   All data entities include a `user_id` foreign key for multi-tenancy.
     *   Includes comprehensive documentation and type hints.
 *   **`database.py`**: Manages PostgreSQL database connection, table creation, and schema migrations using SQLModel.
     *   Automatic migration: adds `user_id` columns to existing tables on upgrade.
 *   **`constants.py`**: Application-wide constants for validation (max lengths for text fields, including user-related fields).
-*   **`/templates`**: Jinja2 HTML templates for the admin web panel (`base.html`, `login.html`, `dashboard.html`, `users.html`, `user_detail.html`).
+*   **`/templates`**: Jinja2 HTML templates for the admin web panel (`base.html`, `login.html`, `dashboard.html`, `users.html`, `user_detail.html`, `fee_config.html`).
 *   **`/static`**: Static assets for the admin panel (`admin.css` — dark-themed, responsive CSS).
 *   **`.env`**: Environment configuration file containing `DATABASE_URL`, and optionally `JWT_SECRET_KEY` and `ADMIN_DEFAULT_PASSWORD`.
 *   **`/invoices`**: Directory for storing uploaded invoice files (auto-created).
@@ -154,7 +174,7 @@ The project is divided into two main parts: a Python/FastAPI backend and a React
 *   **`icons/`**: Directory for storing category icon files (auto-created).
 *   **`Dockerfile`**: Docker configuration for PostgreSQL database.
 *   **`run_app.sh`**: Automated setup and execution script.
-*   **`requirements.txt`**: Python dependencies including FastAPI, Uvicorn, SQLModel, psycopg2-binary, python-multipart, python-jose, bcrypt, Jinja2, and itsdangerous.
+*   **`requirements.txt`**: Python dependencies including FastAPI, Uvicorn, SQLModel, psycopg2-binary, python-multipart, python-jose, bcrypt, Jinja2, itsdangerous, and numpy.
 *   **`admin.md`**: Comprehensive admin documentation for the multi-user authentication system (security architecture, API reference, admin panel guide, troubleshooting).
 
 ## System Requirements
@@ -267,7 +287,8 @@ The frontend application will be available at `http://localhost:5173`. API reque
     *   JWT tokens issued on login via `python-jose` (HS256, 30-minute expiry).
     *   Two FastAPI dependencies: `get_current_user` (validates JWT) and `get_current_admin` (also checks `is_admin` flag).
     *   All data endpoints inject `get_current_user` for automatic authentication.
-*   **Admin Panel (`admin.py`)**: Server-side rendered Jinja2 templates with signed cookie sessions (`itsdangerous`). Separate from the JWT auth flow — admin sessions use cookies with a 1-hour max age.
+*   **Admin Panel (`admin.py`)**: Server-side rendered Jinja2 templates with signed cookie sessions (`itsdangerous`). Separate from the JWT auth flow — admin sessions use cookies with a 1-hour max age. Includes fee configuration page and API endpoints for managing per-user fee plans.
+*   **Transaction Fee Engine (`fee_engine.py`)**: Computes fees using either interval-based regression curves or mathematical formulas. Formula evaluation uses Python's `ast` module for safe parsing (no `eval()`). Payment frequency is calculated as the fraction of user payments in a given amount range. Polynomial regression supports 0–5th degree with corner cases: 0 points → identity function scaled to max fee, 1 point → proportional through origin, 2 points → linear interpolation, 3+ points → least-squares polynomial fit.
 *   **Data Models (`models.py`)**: SQLModel combines Pydantic (validation/serialization) and SQLAlchemy (database ORM). Relationships include:
     *   One-to-many: `User` → `PaymentItem`, `User` → `Recipient`, `User` → `Category`, `User` → `CategoryType`
     *   One-to-many: `Recipient` → `PaymentItem`, `CategoryType` → `Category`
@@ -281,6 +302,7 @@ The frontend application will be available at `http://localhost:5173`. API reque
     3.  Validates input data using Pydantic models.
     4.  Scopes queries to the authenticated user's data.
     5.  Commits changes and returns updated objects as JSON.
+    6.  For payment item create/update/delete: computes, recomputes, or refunds transaction fees via `fee_engine.py`.
 *   **Validation & Normalization**: Names are normalized (whitespace collapsed), uniqueness is enforced (per user), and field lengths are validated against constants.
 *   **File Management**: Uploaded files (icons and invoices) are stored in dedicated directories with unique filenames. Files are automatically deleted when associated records are removed. Invoice uploads/downloads enforce ownership checks.
 *   **Category Filtering**: When filtering by categories, the backend automatically expands the selection to include all descendant categories, making parent category selection intuitive.
@@ -312,6 +334,7 @@ The frontend application will be available at `http://localhost:5173`. API reque
 - Session-based authentication with signed cookies (separate from JWT)
 - Dashboard with real-time statistics across all users
 - User management: search, edit profiles, reset passwords, activate/deactivate
+- Transaction fee configuration with interactive chart editor (see **Transaction Fees** below)
 - Safety guard: admins cannot deactivate their own account
 - For full documentation, see [`admin.md`](admin.md)
 
@@ -356,3 +379,19 @@ The frontend application will be available at `http://localhost:5173`. API reque
 - Validation of data types and field lengths
 - Deduplication of recipients and categories (scoped per user)
 - Batch processing with transaction safety
+
+### Transaction Fees
+- **Per-user fee plans** configured via the admin panel at `/admin/fees`
+- Two fee plan modes:
+  - **Amount Table** (default): define payment amount intervals (e.g., `[0, 100, 500, 1000]`) with per-interval fee curves set by clicking points on an interactive chart canvas and running regression
+  - **Formula**: a mathematical expression `f(x, y)` where `x` = absolute payment amount and `y` = payment frequency (evaluated safely via AST parsing, no `eval()`)
+- **Interactive chart**: canvas-based editor with axes for payment frequency (0–1) and relative transaction fee (0–maxFee), click-to-set data points, and polynomial regression
+- **Regression corner cases**: 0 points → identity function `f(x) = maxFee * x`; 1 point → proportional slope; 2 points → linear interpolation; 3+ → polynomial fit (up to degree 5)
+- **Fee application rules**:
+  - Income (positive): fee subtracted from stored amount
+  - Expense (negative): fee subtracted, increasing the absolute value
+  - Fee capped at 100% of the payment amount
+  - Fees below 0.01€ (after rounding to 2 decimal places) are not applied
+- **Lifecycle integration**: fees auto-applied on payment create, recomputed on amount update, refunded on delete
+- **Non-retroactive**: changing a fee plan does not affect existing payment items
+- **Database models**: `TransactionFeePlan` (one per user) and `TransactionFeeRecord` (one per payment item with fee)

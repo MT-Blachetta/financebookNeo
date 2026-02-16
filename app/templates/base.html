@@ -1,11 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}FinanceBook Admin{% endblock %}</title>
     <link rel="stylesheet" href="/static/admin.css">
 </head>
+
 <body>
     {% block nav %}
     {% if admin is defined and admin %}
@@ -18,6 +20,7 @@
         <div class="nav-links">
             <a href="/admin/dashboard" class="nav-link">Dashboard</a>
             <a href="/admin/users" class="nav-link">Users</a>
+            <a href="/admin/fees" class="nav-link">Fees</a>
             <span class="nav-separator">|</span>
             <span class="nav-user">{{ admin.prename }} {{ admin.surname }}</span>
             <a href="/admin/logout" class="nav-link nav-logout">Logout</a>
@@ -34,4 +37,5 @@
         <p>FinanceBook Admin Panel &copy; 2026</p>
     </footer>
 </body>
+
 </html>

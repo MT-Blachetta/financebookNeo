@@ -23,7 +23,8 @@ from sqlmodel import Session, select
 
 from app.auth import hash_password, verify_password, SECRET_KEY
 from app.database import get_session
-from app.models import User, PaymentItem, Recipient, Category, CategoryType
+from app.models import User, PaymentItem, Recipient, Category, CategoryType, TransactionFeePlan
+from app.fee_engine import validate_formula
 
 # ─── Configuration ───────────────────────────────────────────────────
 
@@ -307,3 +308,101 @@ def admin_user_toggle_active(
     session.commit()
 
     return RedirectResponse(url=f"/admin/users/{user_id}", status_code=302)
+
+
+# ─── Fee Configuration ──────────────────────────────────────────────
+
+@admin_router.get("/fees", response_class=HTMLResponse)
+def admin_fees_page(
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Render the transaction fee configuration page."""
+    admin = _require_admin(request, session)
+    users = session.exec(select(User).order_by(User.id)).all()
+
+    return templates.TemplateResponse("fee_config.html", {
+        "request": request,
+        "admin": admin,
+        "users": users,
+    })
+
+
+@admin_router.get("/api/fee-plan/{user_id}")
+def get_fee_plan(
+    user_id: int,
+    request: Request,
+    session: Session = Depends(get_session),
+):
+    """Return the fee plan for a specific user as JSON."""
+    _require_admin(request, session)
+
+    import json
+    plan = session.exec(
+        select(TransactionFeePlan).where(TransactionFeePlan.user_id == user_id)
+    ).first()
+
+    if not plan:
+        return {
+            "mode": "table",
+            "formula_text": "",
+            "amount_table": [0],
+            "interval_data": {},
+        }
+
+    return {
+        "mode": plan.mode,
+        "formula_text": plan.formula_text or "",
+        "amount_table": json.loads(plan.amount_table_json),
+        "interval_data": json.loads(plan.interval_data_json),
+    }
+
+
+@admin_router.put("/api/fee-plan/{user_id}")
+def save_fee_plan(
+    user_id: int,
+    request: Request,
+    body: dict,
+    session: Session = Depends(get_session),
+):
+    """Save/update the fee plan for a specific user."""
+    _require_admin(request, session)
+
+    import json
+    from datetime import datetime
+
+    plan = session.exec(
+        select(TransactionFeePlan).where(TransactionFeePlan.user_id == user_id)
+    ).first()
+
+    if not plan:
+        plan = TransactionFeePlan(user_id=user_id)
+
+    plan.mode = body.get("mode", "table")
+    plan.formula_text = body.get("formula_text", None)
+    plan.amount_table_json = json.dumps(body.get("amount_table", [0]))
+    plan.interval_data_json = json.dumps(body.get("interval_data", {}))
+    plan.updated_at = datetime.utcnow()
+
+    session.add(plan)
+    session.commit()
+    session.refresh(plan)
+
+    return {"status": "ok"}
+
+
+@admin_router.post("/api/fee-plan/{user_id}/validate-formula")
+def validate_formula_endpoint(
+    user_id: int,
+    request: Request,
+    body: dict,
+    session: Session = Depends(get_session),
+):
+    """Validate a fee formula expression."""
+    _require_admin(request, session)
+
+    formula = body.get("formula", "")
+    is_valid = validate_formula(formula)
+
+    return {"valid": is_valid}
+

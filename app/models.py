@@ -291,3 +291,49 @@ class PaymentItemRead(PaymentItemBase):
     recipient: Optional[Recipient] = None
     categories: List[Category] = []
     standard_category: Optional[Category] = None
+
+
+# ─── Transaction Fee Models ──────────────────────────────────────────
+
+class TransactionFeePlan(SQLModel, table=True):
+    """
+    Fee configuration for a user.
+
+    Each user has at most one active fee plan.  The plan can be defined
+    in two modes:
+      • **table** – an amount table with per-interval chart-based fees
+      • **formula** – a single mathematical expression f(x, y)
+
+    When the mode is "table", `amount_table_json` holds the sorted list
+    of lower-limit amounts (e.g. ``[0, 100, 500]``), and
+    `interval_data_json` holds a dict keyed by interval start value
+    containing max_fee, clicked points, and regression coefficients.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", sa_column_kwargs={"unique": True})
+
+    mode: str = Field(default="table")           # "table" | "formula"
+    formula_text: Optional[str] = None            # e.g. "x*y+0.05"
+    amount_table_json: str = Field(default="[0]") # JSON array
+    interval_data_json: str = Field(default="{}")  # JSON dict
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
+
+
+class TransactionFeeRecord(SQLModel, table=True):
+    """
+    Record of a fee applied to a specific payment item.
+
+    Stored so that fee refunds (on delete) and adjustments (on update)
+    can be processed accurately, independent of any later changes to
+    the user's fee plan.
+    """
+    id: Optional[int] = Field(default=None, primary_key=True)
+    payment_item_id: int = Field(foreign_key="paymentitem.id")
+    user_id: int = Field(foreign_key="user.id")
+
+    fee_amount: float          # always positive – the actual fee charged
+    original_amount: float     # payment amount before fee deduction
+
+    created_at: datetime = Field(default_factory=datetime.utcnow)

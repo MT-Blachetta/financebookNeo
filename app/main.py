@@ -36,7 +36,9 @@ from app.models import (
     UserCreate,
     UserRead,
     UserUpdate,
+    TransactionFeeRecord,
 )
+from app.fee_engine import create_fee_record, refund_fee_record, recompute_fee_record
 from app.auth import (
     hash_password,
     verify_password,
@@ -431,6 +433,9 @@ def create_payment_item(
             session.add(link)
         session.commit()
 
+    # 7. Compute and apply transaction fee
+    create_fee_record(db_item, current_user.id, session)
+
     return db_item
 
 
@@ -622,6 +627,12 @@ def update_payment_item(
         session.add(db_item)
         session.commit()
         session.refresh(db_item)
+
+        # 5. Recompute transaction fee if amount changed
+        if "amount" in update_data:
+            logger.info("Amount changed, recomputing transaction fee")
+            recompute_fee_record(db_item, update_data["amount"], current_user.id, session)
+
         logger.info(f"Successfully updated payment item {item_id}")
         return db_item
         
@@ -664,6 +675,10 @@ def delete_payment_item(
             os.remove(file_path)
         else:
             logger.warning(f"Invoice file not found on disk: {file_path}")
+    
+    # refund transaction fee if one was recorded
+    logger.info("Refunding transaction fee if applicable")
+    refund_fee_record(item_id, session)
     
     # also delete associated category links first (to avoid foreign key constraint issues)
     logger.info("Deleting associated category links")

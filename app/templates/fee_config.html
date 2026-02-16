@@ -1,0 +1,826 @@
+{% extends "base.html" %}
+{% block title %}Transaction Fees - FinanceBook Admin{% endblock %}
+
+{% block content %}
+<style>
+    /* ─── Fee Config Layout ────────────────────────────────────────────── */
+    .fee-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 1.5rem;
+        gap: 1rem;
+    }
+
+    .fee-header h1 {
+        font-size: 1.5rem;
+        font-weight: 700;
+    }
+
+    .fee-user-select {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+    }
+
+    .fee-user-select label {
+        color: var(--text-secondary);
+        font-size: 0.9rem;
+    }
+
+    .fee-user-select select {
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        padding: 0.5rem 0.8rem;
+        color: var(--text-primary);
+        font-size: 0.9rem;
+        font-family: var(--font-sans);
+    }
+
+    .fee-layout {
+        display: grid;
+        grid-template-columns: 2fr 1fr;
+        gap: 1.5rem;
+    }
+
+    @media (max-width: 900px) {
+        .fee-layout {
+            grid-template-columns: 1fr;
+        }
+    }
+
+    /* ─── Chart Card ────────────────────────────────────────── */
+    .chart-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 1.5rem;
+    }
+
+    .chart-controls {
+        display: flex;
+        align-items: center;
+        gap: 0.8rem;
+        margin-bottom: 1rem;
+    }
+
+    .chart-controls label {
+        font-weight: 600;
+        font-size: 0.95rem;
+    }
+
+    .chart-controls input[type="number"] {
+        width: 100px;
+        background: var(--bg-input);
+        border: 2px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        padding: 0.5rem;
+        font-size: 1.1rem;
+        font-weight: 700;
+        text-align: center;
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+    }
+
+    .chart-controls input[type="number"]:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .canvas-wrap {
+        position: relative;
+        width: 100%;
+        height: 400px;
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        background: var(--bg-primary);
+        overflow: hidden;
+    }
+
+    .canvas-wrap canvas {
+        width: 100%;
+        height: 100%;
+        cursor: crosshair;
+    }
+
+
+
+    .regression-btn {
+        display: block;
+        margin: 1rem auto 0;
+        background: var(--accent);
+        color: #fff;
+        border: none;
+        padding: 0.6rem 2rem;
+        border-radius: 20px;
+        font-weight: 600;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: all 0.2s;
+    }
+
+    .regression-btn:hover {
+        background: var(--accent-hover);
+        transform: translateY(-1px);
+    }
+
+    /* ─── Right Column ─────────────────────────────────────── */
+    .right-col {
+        display: flex;
+        flex-direction: column;
+        gap: 1.2rem;
+    }
+
+    /* Fee Table */
+    .fee-section-title {
+        font-size: 1rem;
+        font-weight: 700;
+        margin-bottom: 0.6rem;
+    }
+
+    .fee-table-wrap {
+        background: var(--bg-card);
+        border: 2px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        overflow: hidden;
+    }
+
+    .fee-table {
+        width: 100%;
+        border-collapse: collapse;
+    }
+
+    .fee-table td {
+        padding: 0.6rem 0.8rem;
+        border-bottom: 1px solid var(--border-color);
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+    }
+
+    .fee-table tr {
+        cursor: pointer;
+        transition: background 0.15s;
+    }
+
+    .fee-table tr:hover {
+        background: var(--bg-hover);
+    }
+
+    .fee-table tr.active {
+        background: var(--accent);
+        color: #fff;
+        font-weight: 700;
+    }
+
+    .fee-table tr.active input {
+        color: #fff;
+    }
+
+    .fee-table input[type="number"] {
+        background: transparent;
+        border: none;
+        width: 100%;
+        font-family: inherit;
+        font-size: inherit;
+        font-weight: inherit;
+        outline: none;
+        color: var(--text-primary);
+    }
+
+    .fee-table .euro-cell {
+        width: 30px;
+        text-align: left;
+        font-weight: 600;
+    }
+
+    .fee-table .trash-cell {
+        width: 32px;
+        text-align: center;
+    }
+
+    .fee-table .trash-btn {
+        background: none;
+        border: none;
+        cursor: pointer;
+        font-size: 1rem;
+        color: var(--danger);
+        opacity: 0.7;
+        transition: opacity 0.2s;
+    }
+
+    .fee-table .trash-btn:hover {
+        opacity: 1;
+    }
+
+    .add-row-btn {
+        width: 100%;
+        background: var(--success);
+        color: #fff;
+        font-weight: 700;
+        border: none;
+        padding: 0.7rem;
+        cursor: pointer;
+        text-transform: uppercase;
+        font-size: 0.78rem;
+        letter-spacing: 0.05em;
+        transition: opacity 0.2s;
+    }
+
+    .add-row-btn:hover {
+        opacity: 0.85;
+    }
+
+    /* Formula Box */
+    .formula-card {
+        background: var(--bg-card);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-lg);
+        padding: 1.2rem;
+    }
+
+    .formula-card label {
+        display: block;
+        font-weight: 600;
+        font-size: 0.9rem;
+        margin-bottom: 0.5rem;
+    }
+
+    .formula-card textarea {
+        width: 100%;
+        height: 70px;
+        padding: 0.6rem;
+        background: var(--bg-input);
+        border: 1px solid var(--border-color);
+        border-radius: var(--radius-sm);
+        color: var(--text-primary);
+        font-family: var(--font-mono);
+        font-size: 0.9rem;
+        resize: none;
+        margin-bottom: 0.6rem;
+    }
+
+    .formula-card textarea:focus {
+        outline: none;
+        border-color: var(--accent);
+    }
+
+    .formula-error {
+        color: var(--danger);
+        font-size: 0.82rem;
+        margin-bottom: 0.5rem;
+        display: none;
+    }
+
+    .eval-btn {
+        display: block;
+        margin: 0 auto;
+        background: var(--success);
+        color: #fff;
+        border: 2px solid #22713a;
+        padding: 0.5rem 1.8rem;
+        border-radius: 20px;
+        font-weight: 700;
+        font-size: 0.95rem;
+        cursor: pointer;
+        transition: all 0.15s;
+        box-shadow: 2px 2px 0px #1a5c2e;
+    }
+
+    .eval-btn:active {
+        transform: translate(2px, 2px);
+        box-shadow: none;
+    }
+</style>
+
+<div class="fee-header">
+    <h1>Transaction Fee Configuration</h1>
+    <div class="fee-user-select">
+        <label>User:</label>
+        <select id="userSelect" onchange="loadFeePlan()">
+            {% for u in users %}
+            <option value="{{ u.id }}">{{ u.prename }} {{ u.surname }} ({{ u.username }})</option>
+            {% endfor %}
+        </select>
+    </div>
+</div>
+
+<div class="fee-layout">
+    <!-- LEFT: Chart -->
+    <div class="chart-card">
+        <div class="chart-controls">
+            <label>maximal transaction fee:</label>
+            <input type="number" id="maxFeeInput" value="0.1" step="0.01" min="0.01">
+        </div>
+        <div class="canvas-wrap">
+            <canvas id="feeChart"></canvas>
+        </div>
+        <button class="regression-btn" onclick="runRegression()">Regression</button>
+    </div>
+
+    <!-- RIGHT: Table + Formula -->
+    <div class="right-col">
+        <div>
+            <div class="fee-section-title">amount: (x)</div>
+            <div class="fee-table-wrap">
+                <table class="fee-table">
+                    <tbody id="tableBody"></tbody>
+                </table>
+                <button class="add-row-btn" onclick="addTableRow()">add new minimum level</button>
+            </div>
+        </div>
+
+        <div class="formula-card">
+            <label>fee equation (amount x, frequency y)</label>
+            <textarea id="formulaInput" placeholder='Enter formula using "x" and "y"...'></textarea>
+            <div class="formula-error" id="formulaError">validation failed, please enter a correct formula</div>
+            <button class="eval-btn" onclick="evaluateFormula()">evaluate</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // ─── STATE ──────────────────────────────────────────────────────────
+    let amountTable = [0];
+    let intervalData = {};          // keyed by interval start value (string)
+    let activeIndex = 0;
+    let mode = "table";
+    let formulaText = "";
+
+    function currentUserId() {
+        return parseInt(document.getElementById("userSelect").value);
+    }
+
+    // ─── CANVAS REFS ────────────────────────────────────────────────────
+    const canvas = document.getElementById("feeChart");
+    const ctx = canvas.getContext("2d");
+    const maxFeeInput = document.getElementById("maxFeeInput");
+    const tableBody = document.getElementById("tableBody");
+
+    // ─── INIT ───────────────────────────────────────────────────────────
+    function init() {
+        resizeCanvas();
+        window.addEventListener("resize", () => { resizeCanvas(); drawGraph(); });
+        maxFeeInput.addEventListener("input", (e) => {
+            const key = String(amountTable[activeIndex]);
+            if (!intervalData[key]) intervalData[key] = { maxFee: 0.1, points: [], coefficients: null };
+            intervalData[key].maxFee = parseFloat(e.target.value) || 0.1;
+            drawGraph();
+            savePlan();
+        });
+        canvas.addEventListener("mousedown", handleCanvasClick);
+        loadFeePlan();
+    }
+
+    function resizeCanvas() {
+        const rect = canvas.parentElement.getBoundingClientRect();
+        canvas.width = rect.width;
+        canvas.height = rect.height;
+    }
+
+    // ─── LOAD / SAVE ────────────────────────────────────────────────────
+    async function loadFeePlan() {
+        const uid = currentUserId();
+        try {
+            const res = await fetch(`/admin/api/fee-plan/${uid}`);
+            const data = await res.json();
+            mode = data.mode || "table";
+            formulaText = data.formula_text || "";
+            amountTable = data.amount_table || [0];
+            intervalData = data.interval_data || {};
+            activeIndex = 0;
+
+            // Restore UI
+            document.getElementById("formulaInput").value = formulaText;
+            loadIntervalUI();
+            renderTable();
+            drawGraph();
+        } catch (e) {
+            console.error("Failed to load fee plan:", e);
+        }
+    }
+
+    async function savePlan() {
+        const uid = currentUserId();
+        try {
+            await fetch(`/admin/api/fee-plan/${uid}`, {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    mode: mode,
+                    formula_text: formulaText || null,
+                    amount_table: amountTable,
+                    interval_data: intervalData,
+                }),
+            });
+        } catch (e) {
+            console.error("Failed to save fee plan:", e);
+        }
+    }
+
+    // ─── INTERVAL UI ────────────────────────────────────────────────────
+    function loadIntervalUI() {
+        const key = String(amountTable[activeIndex]);
+        const idata = intervalData[key] || { maxFee: 0.1, points: [], coefficients: null };
+        maxFeeInput.value = idata.maxFee || 0.1;
+    }
+
+    // ─── CHART DRAWING ──────────────────────────────────────────────────
+    function drawGraph() {
+        const w = canvas.width;
+        const h = canvas.height;
+        const pad = 60;
+
+        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = getComputedStyle(document.documentElement).getPropertyValue("--bg-primary").trim() || "#0f1117";
+        ctx.fillRect(0, 0, w, h);
+
+        const key = String(amountTable[activeIndex]);
+        const idata = intervalData[key] || { maxFee: 0.1, points: [], coefficients: null };
+        const maxFee = idata.maxFee || 0.1;
+
+        // Axes
+        ctx.beginPath();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = "#5a5f73";
+        ctx.moveTo(pad, 15);
+        ctx.lineTo(pad, h - pad);
+        ctx.lineTo(w - 15, h - pad);
+        ctx.stroke();
+
+        // Y label
+        ctx.save();
+        ctx.translate(16, h / 2);
+        ctx.rotate(-Math.PI / 2);
+        ctx.fillStyle = "#9fa4b4";
+        ctx.font = "bold 13px Inter, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("relative transaction fee", 0, 0);
+        ctx.restore();
+
+        // Grid + Ticks
+        const chartW = w - pad - 20;
+        const chartH = h - pad - 20;
+
+        ctx.font = "11px JetBrains Mono, monospace";
+        ctx.fillStyle = "#9fa4b4";
+
+        // Y ticks
+        ctx.textAlign = "right";
+        for (let i = 0; i <= 5; i++) {
+            const val = (maxFee * i / 5).toFixed(3);
+            const yy = (h - pad) - (chartH * i / 5);
+            ctx.beginPath(); ctx.strokeStyle = "#2e3241"; ctx.lineWidth = 1;
+            ctx.moveTo(pad, yy); ctx.lineTo(w - 15, yy); ctx.stroke();
+            ctx.fillText(val, pad - 8, yy + 4);
+        }
+
+        // X ticks
+        ctx.textAlign = "center";
+        for (let i = 0; i <= 10; i++) {
+            const val = (i / 10).toFixed(1);
+            const xx = pad + (chartW * i / 10);
+            ctx.beginPath(); ctx.strokeStyle = "#2e3241"; ctx.lineWidth = 1;
+            ctx.moveTo(xx, 15); ctx.lineTo(xx, h - pad); ctx.stroke();
+            ctx.fillStyle = "#9fa4b4";
+            ctx.fillText(val, xx, h - pad + 16);
+        }
+
+        // X label (rendered on canvas, matching Y label style)
+        ctx.fillStyle = "#9fa4b4";
+        ctx.font = "bold 13px Inter, sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("payment frequency (y)", pad + chartW / 2, h - 8);
+
+        // Regression curve
+        if (idata.coefficients && idata.coefficients.length > 0) {
+            ctx.beginPath();
+            ctx.strokeStyle = "#34c759";
+            ctx.lineWidth = 2.5;
+            for (let px = 0; px <= chartW; px++) {
+                const freq = px / chartW;
+                let feeVal = 0;
+                for (let ci = 0; ci < idata.coefficients.length; ci++) {
+                    feeVal += idata.coefficients[ci] * Math.pow(freq, ci);
+                }
+                feeVal = Math.max(0, Math.min(feeVal, maxFee));
+                const cy = (h - pad) - (feeVal / maxFee) * chartH;
+                if (px === 0) ctx.moveTo(pad + px, cy); else ctx.lineTo(pad + px, cy);
+            }
+            ctx.stroke();
+        }
+
+        // Points
+        (idata.points || []).forEach(pt => {
+            const px = pad + pt.freq * chartW;
+            const py = (h - pad) - (pt.fee / maxFee) * chartH;
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, 2 * Math.PI);
+            ctx.fillStyle = "#4a7dff";
+            ctx.fill();
+            ctx.strokeStyle = "#fff";
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+        });
+    }
+
+    // ─── CANVAS CLICK ───────────────────────────────────────────────────
+    function handleCanvasClick(e) {
+        if (mode !== "table") return;
+        const rect = canvas.getBoundingClientRect();
+        const w = canvas.width;
+        const h = canvas.height;
+        const pad = 60;
+        const scaleX = w / rect.width;
+        const scaleY = h / rect.height;
+        const clickX = (e.clientX - rect.left) * scaleX;
+        const clickY = (e.clientY - rect.top) * scaleY;
+        if (clickX < pad || clickY > h - pad || clickY < 15) return;
+
+        const chartW = w - pad - 20;
+        const chartH = h - pad - 20;
+        const key = String(amountTable[activeIndex]);
+        if (!intervalData[key]) intervalData[key] = { maxFee: parseFloat(maxFeeInput.value) || 0.1, points: [], coefficients: null };
+        const idata = intervalData[key];
+        const maxFee = idata.maxFee;
+
+        let freq = (clickX - pad) / chartW;
+        let fee = ((h - pad) - clickY) / chartH * maxFee;
+        freq = Math.max(0, Math.min(1, freq));
+        fee = Math.max(0, Math.min(maxFee, fee));
+
+        // Map to grid: use 100 grid columns for frequency
+        const gridX = Math.round(freq * 100);
+        const gridFreq = gridX / 100;
+
+        // Replace existing point with same gridX
+        idata.points = (idata.points || []).filter(p => Math.round(p.freq * 100) !== gridX);
+        idata.points.push({ freq: gridFreq, fee: fee });
+        idata.points.sort((a, b) => a.freq - b.freq);
+
+        drawGraph();
+        savePlan();
+    }
+
+    // ─── TABLE ──────────────────────────────────────────────────────────
+    function renderTable() {
+        tableBody.innerHTML = "";
+        amountTable.forEach((val, idx) => {
+            const tr = document.createElement("tr");
+            if (idx === activeIndex) tr.classList.add("active");
+            tr.onclick = () => { activeIndex = idx; loadIntervalUI(); renderTable(); drawGraph(); };
+
+            // Euro cell (left)
+            const euroTd = document.createElement("td");
+            euroTd.className = "euro-cell";
+            euroTd.textContent = "€";
+            tr.appendChild(euroTd);
+
+            // Value cell
+            const valTd = document.createElement("td");
+            if (idx === 0) {
+                valTd.textContent = "0";
+            } else {
+                const inp = document.createElement("input");
+                inp.type = "number";
+                inp.value = val;
+                inp.step = "0.01";
+                inp.onclick = (e) => e.stopPropagation();
+                inp.onchange = (e) => updateTableValue(idx, parseFloat(e.target.value));
+                valTd.appendChild(inp);
+            }
+            tr.appendChild(valTd);
+
+            // Trash cell (only on last row if 2+ rows)
+            const trashTd = document.createElement("td");
+            trashTd.className = "trash-cell";
+            if (idx === amountTable.length - 1 && amountTable.length > 1) {
+                const btn = document.createElement("button");
+                btn.className = "trash-btn";
+                btn.innerHTML = "🗑";
+                btn.onclick = (e) => { e.stopPropagation(); removeLastRow(); };
+                trashTd.appendChild(btn);
+            }
+            tr.appendChild(trashTd);
+
+            tableBody.appendChild(tr);
+        });
+    }
+
+    function addTableRow() {
+        const lastVal = amountTable[amountTable.length - 1];
+        const newVal = parseFloat((lastVal + 10).toFixed(2));
+        amountTable.push(newVal);
+
+        // If we were in formula mode, switch back to table mode
+        if (mode === "formula") {
+            mode = "table";
+            formulaText = "";
+            document.getElementById("formulaInput").value = "";
+            document.getElementById("formulaError").style.display = "none";
+        }
+
+        if (activeIndex >= amountTable.length) activeIndex = amountTable.length - 1;
+        renderTable();
+        drawGraph();
+        savePlan();
+    }
+
+    function removeLastRow() {
+        if (amountTable.length <= 1) return;
+        const removedKey = String(amountTable[amountTable.length - 1]);
+        // Get previous interval key
+        const prevKey = String(amountTable[amountTable.length - 2]);
+        // Transfer fee plan from removed interval to previous interval's [prev, infinity]
+        if (intervalData[removedKey]) {
+            // Keep the previous interval's data (or adopt the removed interval's data)
+            // The spec says: "it takes over the fee plan from [second last value, last value] before"
+            // That means the interval [prevKey, removedKey] stays as-is, now becomes [prevKey, inf]
+            // No data change needed – just remove the key for the removed value
+        }
+        delete intervalData[removedKey];
+        amountTable.pop();
+        if (activeIndex >= amountTable.length) activeIndex = amountTable.length - 1;
+        renderTable();
+        drawGraph();
+        savePlan();
+    }
+
+    function updateTableValue(idx, newVal) {
+        if (idx === 0) return; // First value is always 0
+        if (isNaN(newVal)) return;
+
+        // Value must not be zero
+        if (newVal === 0) { renderTable(); return; }
+
+        // If not last: must be at least 0.02 less than follower
+        if (idx < amountTable.length - 1) {
+            if (newVal > amountTable[idx + 1] - 0.02) { renderTable(); return; }
+        }
+
+        // Must be at least 0.02 more than predecessor
+        if (newVal < amountTable[idx - 1] + 0.02) { renderTable(); return; }
+
+        // Update key in intervalData
+        const oldKey = String(amountTable[idx]);
+        const newKey = String(newVal);
+        if (intervalData[oldKey] && oldKey !== newKey) {
+            intervalData[newKey] = intervalData[oldKey];
+            delete intervalData[oldKey];
+        }
+
+        amountTable[idx] = parseFloat(newVal.toFixed(2));
+        renderTable();
+        drawGraph();
+        savePlan();
+    }
+
+    // ─── REGRESSION ─────────────────────────────────────────────────────
+    function runRegression() {
+        if (mode !== "table") return;
+        const key = String(amountTable[activeIndex]);
+        if (!intervalData[key]) intervalData[key] = { maxFee: parseFloat(maxFeeInput.value) || 0.1, points: [], coefficients: null };
+        const idata = intervalData[key];
+        const maxFee = idata.maxFee;
+        const pts = idata.points || [];
+
+        let coefficients;
+        if (pts.length === 0) {
+            // Identity function scaled to maxFee: f(x) = maxFee * x
+            coefficients = [0, maxFee];
+        } else if (pts.length === 1) {
+            const x1 = pts[0].freq, y1 = pts[0].fee;
+            if (x1 === 0) {
+                coefficients = [0, maxFee];
+            } else {
+                coefficients = [0, y1 / x1];
+            }
+        } else if (pts.length === 2) {
+            const x1 = pts[0].freq, y1 = pts[0].fee;
+            const x2 = pts[1].freq, y2 = pts[1].fee;
+            if (x2 === x1) {
+                coefficients = [0, maxFee];
+            } else {
+                coefficients = [0, (y2 - y1) / (x2 - x1)];
+            }
+        } else {
+            // Polynomial regression (least squares)
+            const degree = Math.min(pts.length - 1, 5);
+            coefficients = polyRegression(pts.map(p => p.freq), pts.map(p => p.fee), degree);
+        }
+
+        idata.coefficients = coefficients;
+        drawGraph();
+        savePlan();
+    }
+
+    /**
+     * Simple polynomial regression via normal equations.
+     * Returns coefficients [c0, c1, c2, ...] for f(x) = c0 + c1*x + c2*x² + ...
+     */
+    function polyRegression(xs, ys, degree) {
+        const n = xs.length;
+        const m = degree + 1;
+
+        // Build Vandermonde matrix
+        const X = [];
+        for (let i = 0; i < n; i++) {
+            const row = [];
+            for (let j = 0; j < m; j++) {
+                row.push(Math.pow(xs[i], j));
+            }
+            X.push(row);
+        }
+
+        // X^T * X
+        const XtX = [];
+        for (let i = 0; i < m; i++) {
+            XtX.push([]);
+            for (let j = 0; j < m; j++) {
+                let s = 0;
+                for (let k = 0; k < n; k++) s += X[k][i] * X[k][j];
+                XtX[i].push(s);
+            }
+        }
+
+        // X^T * y
+        const Xty = [];
+        for (let i = 0; i < m; i++) {
+            let s = 0;
+            for (let k = 0; k < n; k++) s += X[k][i] * ys[k];
+            Xty.push(s);
+        }
+
+        // Solve via Gauss elimination
+        const A = XtX.map((row, i) => [...row, Xty[i]]);
+        for (let col = 0; col < m; col++) {
+            // Pivot
+            let maxRow = col;
+            for (let row = col + 1; row < m; row++) {
+                if (Math.abs(A[row][col]) > Math.abs(A[maxRow][col])) maxRow = row;
+            }
+            [A[col], A[maxRow]] = [A[maxRow], A[col]];
+
+            if (Math.abs(A[col][col]) < 1e-12) continue;
+
+            for (let row = col + 1; row < m; row++) {
+                const f = A[row][col] / A[col][col];
+                for (let j = col; j <= m; j++) A[row][j] -= f * A[col][j];
+            }
+        }
+
+        // Back substitution
+        const coeffs = new Array(m).fill(0);
+        for (let i = m - 1; i >= 0; i--) {
+            if (Math.abs(A[i][i]) < 1e-12) continue;
+            coeffs[i] = A[i][m];
+            for (let j = i + 1; j < m; j++) coeffs[i] -= A[i][j] * coeffs[j];
+            coeffs[i] /= A[i][i];
+        }
+        return coeffs;
+    }
+
+    // ─── FORMULA ────────────────────────────────────────────────────────
+    async function evaluateFormula() {
+        const formula = document.getElementById("formulaInput").value.trim();
+        const errorEl = document.getElementById("formulaError");
+        if (!formula) { errorEl.style.display = "block"; return; }
+
+        try {
+            const uid = currentUserId();
+            const res = await fetch(`/admin/api/fee-plan/${uid}/validate-formula`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ formula }),
+            });
+            const data = await res.json();
+
+            if (!data.valid) {
+                errorEl.style.display = "block";
+                return;
+            }
+
+            // Valid: switch to formula mode
+            errorEl.style.display = "none";
+            mode = "formula";
+            formulaText = formula;
+
+            // Clear amount table back to [0] and clear interval data
+            amountTable = [0];
+            intervalData = {};
+            activeIndex = 0;
+
+            renderTable();
+            drawGraph();
+            savePlan();
+
+        } catch (e) {
+            console.error("Validation error:", e);
+            errorEl.style.display = "block";
+        }
+    }
+
+    // ─── START ──────────────────────────────────────────────────────────
+    init();
+</script>
+{% endblock %}
