@@ -18,6 +18,7 @@ import styled from 'styled-components';
 import { Recipient, Category, PaymentItemFormData, PaymentItem } from '../types';
 import {
   useRecipients,
+  useCategoryTypes,
   useCategoriesByType,
   useCreatePaymentItem,
   useCreateRecipient,
@@ -96,8 +97,8 @@ const ToggleHalf = styled.button<{ active: boolean; isPositive: boolean }>`
   cursor: pointer;
   transition: background-color 0.2s ease;
   
-  background-color: ${props => 
-    props.active 
+  background-color: ${props =>
+    props.active
       ? (props.isPositive ? 'var(--color-positive)' : 'var(--color-negative)')
       : '#666'
   };
@@ -105,11 +106,11 @@ const ToggleHalf = styled.button<{ active: boolean; isPositive: boolean }>`
   color: ${props => props.active ? 'white' : '#ccc'};
 
   &:hover {
-    background-color: ${props => 
-      props.active 
-        ? (props.isPositive ? '#059669' : '#dc2626')
-        : '#777'
-    };
+    background-color: ${props =>
+    props.active
+      ? (props.isPositive ? '#059669' : '#dc2626')
+      : '#777'
+  };
   }
 `;
 
@@ -493,22 +494,31 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
   const [categorySearchTerm, setCategorySearchTerm] = useState<string>('');
 
   const categoryDropdownRef = useRef<HTMLDivElement | null>(null);
-  
+
   // error state
   const [error, setError] = useState<string | null>(null);
-  
+
   // semicolon validation dialog state
   const [showSemicolonDialog, setShowSemicolonDialog] = useState<boolean>(false);
-  
+
   // invoice upload state
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [isDragOver, setIsDragOver] = useState<boolean>(false);
   const [uploadProgress, setUploadProgress] = useState<number>(0);
   const [isUploading, setIsUploading] = useState<boolean>(false);
-  
+
   // hooks
   const { data: recipients, isLoading: loadingRecipients, refetch: refetchRecipients } = useRecipients();
-  const { data: categories, isLoading: loadingCategories } = useCategoriesByType(1); // Type ID 1 = "standard"
+  const { data: categoryTypes } = useCategoryTypes();
+
+  // Dynamic resolution of 'standard' category type
+  const standardTypeId = useMemo(() => {
+    if (!categoryTypes) return undefined;
+    const standard = categoryTypes.find(t => t.name.toLowerCase() === 'standard');
+    return standard ? standard.id : categoryTypes[0]?.id;
+  }, [categoryTypes]);
+
+  const { data: categories, isLoading: loadingCategories } = useCategoriesByType(standardTypeId);
   const createPaymentMutation = useCreatePaymentItem();
   const createRecipientMutation = useCreateRecipient();
   const updateRecipientMutation = useUpdateRecipient();
@@ -546,7 +556,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
     setPeriodic(initialData.periodic);
     setPaymentDescription(initialData.description ?? '');
     setSelectedRecipientId(initialData.recipient_id ? initialData.recipient_id.toString() : '');
-    
+
     // prioritize standard_category_id over categories array
     if (initialData.standard_category_id) {
       setSelectedCategoryId(initialData.standard_category_id.toString());
@@ -651,7 +661,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
       if (originalRecipient) {
         const nameChanged = recipientName !== originalRecipient.name;
         const addressChanged = recipientAddress !== (originalRecipient.address || '');
-        
+
         setRecipientModified(nameChanged || addressChanged);
       }
     } else {
@@ -773,7 +783,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
     try {
       const newCat = await createCategoryMutation.mutateAsync({
         name: sanitizedName,
-        type_id: 1, // default category type
+        type_id: standardTypeId ?? 1, // fallback to 1 if types not loaded yet (should rarely happen)
         parent_id: null,
       });
       setSelectedCategoryId(newCat.id.toString());
@@ -917,7 +927,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
       { value: recipientAddress, name: 'Recipient Address' },
       { value: newCategoryName, name: 'Category Name' }
     ];
-    
+
     for (const field of fieldsToCheck) {
       if (field.value && field.value.includes(';')) {
         return false;
@@ -930,20 +940,20 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
-    
+
     // check for semicolons first
     if (!validateSemicolons()) {
       setShowSemicolonDialog(true);
       return;
     }
-    
+
     // validate amount
     const numericAmount = parseFloat(amount);
     if (isNaN(numericAmount) || numericAmount <= 0) {
       setError('Please enter a valid amount greater than 0');
       return;
     }
-    
+
     try {
       // build the payment data
       const paymentData: PaymentItemFormData = {
@@ -959,29 +969,29 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
       if (isEditMode && initialData?.id !== undefined) {
         paymentData.id = initialData.id;
       }
-      
+
       // handle recipient assignment
       if (selectedRecipientId && !selectedRecipientId.startsWith('new:')) {
         paymentData.recipient_id = parseInt(selectedRecipientId);
       }
-      
+
       // handle category selection - set as standard_category_id for standard type categories
       if (selectedCategoryId) {
         const categoryId = parseInt(selectedCategoryId);
         paymentData.category_ids = [categoryId];
         paymentData.standard_category_id = categoryId; // Set as standard category
       }
-      
+
       if (isEditMode && onSubmit) {
         // first update the payment item
         await onSubmit(paymentData);
-        
+
         // then upload the selected file if there is one
         if (selectedFile && initialData?.id) {
           try {
             setIsUploading(true);
             setUploadProgress(0);
-            
+
             // simulate progress for better UX
             const progressInterval = setInterval(() => {
               setUploadProgress(prev => Math.min(prev + 10, 90));
@@ -995,7 +1005,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
             clearInterval(progressInterval);
             setUploadProgress(100);
             setSelectedFile(null);
-            
+
             // reset progress after a short delay
             setTimeout(() => {
               setUploadProgress(0);
@@ -1011,13 +1021,13 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
       } else {
         // create the payment item first
         const createdPayment = await createPaymentMutation.mutateAsync(paymentData);
-        
+
         // if there's a selected file, upload it after payment creation
         if (selectedFile && createdPayment.id) {
           try {
             setIsUploading(true);
             setUploadProgress(0);
-            
+
             // simulate progress for better UX
             const progressInterval = setInterval(() => {
               setUploadProgress(prev => Math.min(prev + 10, 90));
@@ -1030,7 +1040,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
 
             clearInterval(progressInterval);
             setUploadProgress(100);
-            
+
             // reset progress after a short delay
             setTimeout(() => {
               setUploadProgress(0);
@@ -1043,11 +1053,11 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
             setUploadProgress(0);
           }
         }
-        
+
         // navigate to success page
         navigate('/add-success');
       }
-      
+
     } catch (error) {
       console.error('Error creating payment:', error);
       setError('Failed to submit payment. Please try again.');
@@ -1057,7 +1067,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
   return (
     <FormContainer>
       <PageTitle>{isEditMode ? 'Edit Payment' : 'Add New Payment'}</PageTitle>
-      
+
       <form onSubmit={handleSubmit}>
         {/* Amount Field with +/- Toggle */}
         <FormField>
@@ -1199,7 +1209,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
               onChange={(e) => setRecipientAddress(e.target.value)}
               maxLength={RECIPIENT_ADDRESS_MAX_LENGTH}
             />
-            
+
             <AddRecipientButton
               type="button"
               onClick={handleAddRecipient}
@@ -1342,7 +1352,7 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
                   accept=".pdf,.docx,.doc,.jpg,.jpeg,.png,.gif,.bmp,.tiff"
                   onChange={handleFileInputChange}
                 />
-                
+
                 <FileUploadContainer
                   isDragOver={isDragOver}
                   hasFile={!!selectedFile}
@@ -1355,8 +1365,8 @@ export const PaymentItemForm: React.FC<PaymentItemFormProps> = ({
                   <FileUploadText>
                     {selectedFile ?
                       (isEditMode ? 'File selected - will be uploaded when UPDATE is pressed' : 'File selected - will be uploaded after payment creation') :
-                     (isEditMode && initialData?.invoice_path ? 'Drop a new file here or click to replace' :
-                      'Drop your invoice here or click to browse')}
+                      (isEditMode && initialData?.invoice_path ? 'Drop a new file here or click to replace' :
+                        'Drop your invoice here or click to browse')}
                   </FileUploadText>
                   <FileUploadSubtext>
                     Supports PDF, DOCX, DOC, and image files up to 25MB
