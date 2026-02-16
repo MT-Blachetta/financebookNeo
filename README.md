@@ -32,6 +32,7 @@ FinanceBook is a **multi-user** web application designed for managing private fi
     *   Fee is capped at 100% of the payment amount; fees below 0.01€ (after rounding) are not applied.
     *   Non-retroactive: fee plan changes only affect future transactions.
     *   All applied fees are recorded in `TransactionFeeRecord` for accurate refunds and recomputation.
+    *   **Dedicated "Fees" View**: A special filter in the main dashboard allows users to view a list of all transaction fees (>= 0.01€), displayed with red amounts and simplified details.
 *   **Per-User Data Isolation (Multi-Tenancy)**:
     *   Every data entity (payment items, recipients, categories, category types) belongs to a specific user via `user_id`.
     *   All API queries are scoped to the authenticated user — users cannot see or modify each other's data.
@@ -64,7 +65,7 @@ FinanceBook is a **multi-user** web application designed for managing private fi
     *   Each recipient has a name and optional address field.
     *   Name normalization and uniqueness validation (scoped per user).
 *   **Filtering & Pagination**:
-    *   Filter payment items by "All", "Incomes", or "Expenses".
+    *   Filter payment items by "All", "Incomes", "Expenses", or "Fees".
     *   Filter by one or more categories with OR logic (items matching ANY selected category).
     *   The backend automatically expands selected categories to include all descendants.
     *   Single-row pagination bar anchored to the bottom of the viewport with custom blue arrow icons for Previous/Next navigation.

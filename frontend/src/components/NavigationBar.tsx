@@ -43,7 +43,7 @@ const escapeCsvField = (rawValue: string): string => {
 
 /* Types & Props  */
 
-export type ViewFilter = 'all' | 'expenses' | 'incomes';
+export type ViewFilter = 'all' | 'expenses' | 'incomes' | 'fees';
 
 interface NavigationBarProps {
   active: ViewFilter;
@@ -412,6 +412,12 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
           onClick={() => onChange('incomes')}
         >
           Incomes
+        </button>
+        <button
+          className={clsx({ active: active === 'fees' })}
+          onClick={() => onChange('fees')}
+        >
+          Fees
         </button>
       </Filters>
 

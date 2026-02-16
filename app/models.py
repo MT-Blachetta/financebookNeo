@@ -291,6 +291,7 @@ class PaymentItemRead(PaymentItemBase):
     recipient: Optional[Recipient] = None
     categories: List[Category] = []
     standard_category: Optional[Category] = None
+    transaction_fee: Optional[float] = None
 
 
 # ─── Transaction Fee Models ──────────────────────────────────────────

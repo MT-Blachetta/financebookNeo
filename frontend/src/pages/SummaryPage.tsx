@@ -601,9 +601,19 @@ const SummaryPage: React.FC = () => {
 
   /* Derived Data */
 
+  // Filter for fees if selected
+  const filteredData = useMemo(() => {
+    if (viewFilter === 'fees') {
+      // "The transaction fee of a payment is always zero if it is lower than 0.005"
+      // "Every time there is a payment item with a transaction fee (with at least 0,01) we create a special fee payment item"
+      return paymentDataForMemo.filter(item => (item.transaction_fee || 0) >= 0.01);
+    }
+    return paymentDataForMemo;
+  }, [paymentDataForMemo, viewFilter]);
+
   //  sorts the payment items by date, with the most recent items first
   const sorted: PaymentItem[] = useMemo(() => {
-    return [...paymentDataForMemo].sort((a: PaymentItem, b: PaymentItem) => {
+    return [...filteredData].sort((a: PaymentItem, b: PaymentItem) => {
       const dateA = new Date(a.date).getTime();
       const dateB = new Date(b.date).getTime();
       if (sortOrder === 'desc') {
@@ -611,7 +621,7 @@ const SummaryPage: React.FC = () => {
       }
       return dateA - dateB;
     });
-  }, [paymentDataForMemo, sortOrder]);
+  }, [filteredData, sortOrder]);
 
   // Calculate pagination
   const totalPages = Math.ceil(sorted.length / itemsPerPage);
@@ -628,11 +638,17 @@ const SummaryPage: React.FC = () => {
 
   //  calculates the total amount of all the payment items
   const total: number = useMemo(() => {
-    return paymentDataForMemo.reduce(
+    if (viewFilter === 'fees') {
+      return filteredData.reduce(
+        (sum: number, item: PaymentItem) => sum + (item.transaction_fee || 0),
+        0
+      );
+    }
+    return filteredData.reduce(
       (sum: number, item: PaymentItem) => sum + item.amount,
       0
     );
-  }, [paymentDataForMemo]);
+  }, [filteredData, viewFilter]);
 
   //  gets the full category objects for the selected category IDs
   const selectedCategories = useMemo(() => {
@@ -735,73 +751,82 @@ const SummaryPage: React.FC = () => {
           onSortDesc={() => setSortOrder('desc')}
         />
       </div>
-      <CategoryFilterWrapper>
-        <h3>Filter by Categories</h3>
+      {viewFilter !== 'fees' && (
+        <CategoryFilterWrapper>
+          <h3>Filter by Categories</h3>
 
-        <CategoryDropdownContainer>
-          <select
-            value={selectedDropdownCategory}
-            onChange={(e) => setSelectedDropdownCategory(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-            disabled={isLoadingCategories}
-          >
-            <option value="">Select a category...</option>
-            {allCategories
-              .filter(cat => cat.name !== "UNCLASSIFIED" && !selectedCategoryIds.includes(cat.id))
-              .map(cat => (
-                <option key={cat.id} value={cat.id}>
-                  {cat.name}
-                </option>
-              ))
-            }
-          </select>
-          <AddCategoryButton
-            onClick={handleAddCategory}
-            disabled={!selectedDropdownCategory || isLoadingCategories}
-          >
-            Add Category
-          </AddCategoryButton>
-        </CategoryDropdownContainer>
+          <CategoryDropdownContainer>
+            <select
+              value={selectedDropdownCategory}
+              onChange={(e) => setSelectedDropdownCategory(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+              disabled={isLoadingCategories}
+            >
+              <option value="">Select a category...</option>
+              {allCategories
+                .filter(cat => cat.name !== "UNCLASSIFIED" && !selectedCategoryIds.includes(cat.id))
+                .map(cat => (
+                  <option key={cat.id} value={cat.id}>
+                    {cat.name}
+                  </option>
+                ))
+              }
+            </select>
+            <AddCategoryButton
+              onClick={handleAddCategory}
+              disabled={!selectedDropdownCategory || isLoadingCategories}
+            >
+              Add Category
+            </AddCategoryButton>
+          </CategoryDropdownContainer>
 
-        <SelectedCategoriesContainer>
-          {selectedCategories.length === 0 ? (
-            <EmptyState>No category filters applied - showing all payments</EmptyState>
-          ) : (
-            <>
-              {selectedCategories.map(cat => (
-                <CategoryTag key={cat.id}>
-                  {cat.name}
-                  <button onClick={() => handleRemoveCategory(cat.id)} aria-label={`Remove ${cat.name} filter`}>
-                    ×
-                  </button>
-                </CategoryTag>
-              ))}
-              <ResetButton onClick={handleResetFilters}>
-                Reset All
-              </ResetButton>
-            </>
-          )}
-        </SelectedCategoriesContainer>
+          <SelectedCategoriesContainer>
+            {selectedCategories.length === 0 ? (
+              <EmptyState>No category filters applied - showing all payments</EmptyState>
+            ) : (
+              <>
+                {selectedCategories.map(cat => (
+                  <CategoryTag key={cat.id}>
+                    {cat.name}
+                    <button onClick={() => handleRemoveCategory(cat.id)} aria-label={`Remove ${cat.name} filter`}>
+                      ×
+                    </button>
+                  </CategoryTag>
+                ))}
+                <ResetButton onClick={handleResetFilters}>
+                  Reset All
+                </ResetButton>
+              </>
+            )}
+          </SelectedCategoriesContainer>
 
-        {isLoadingCategories && <p>Loading categories...</p>}
-      </CategoryFilterWrapper>
+          {isLoadingCategories && <p>Loading categories...</p>}
+        </CategoryFilterWrapper>
+      )}
 
       {isLoading ? (
         <p>Loading payment items…</p>
       ) : (
         <List>
           {paginatedItems.map(item => (
-            <PaymentItemLine
-              key={item.id}
-              item={item}
-              allCategories={allCategories}
-            />
+            viewFilter === 'fees' ? (
+              <FeeItemLine
+                key={item.id}
+                item={item}
+              />
+            ) : (
+              <PaymentItemLine
+                key={item.id}
+                item={item}
+                allCategories={allCategories}
+              />
+            )
           ))}
 
           {/* Total row */}
           <TotalEntry>
             <TotalLabel>SUM</TotalLabel>
             <AmountContainer>
-              <AmountText $negative={total < 0}>
+              <AmountText $negative={viewFilter === 'fees' || total < 0}>
                 {total.toFixed(2)} €
               </AmountText>
             </AmountContainer>
@@ -975,6 +1000,42 @@ const PaymentItemLine: React.FC<PaymentItemLineProps> = ({ item, allCategories }
         <AmountContainer>
           <AmountText $negative={isExpense(item)}>
             {item.amount.toFixed(2)} €
+          </AmountText>
+        </AmountContainer>
+      </ContentWrapper>
+    </Entry>
+  );
+};
+
+/* Child component: FeeItemLine */
+
+interface FeeItemLineProps {
+  item: PaymentItem;
+}
+
+const FeeItemLine: React.FC<FeeItemLineProps> = ({ item }) => {
+  // Safe formatting because we filter for fees existing
+  const feeAmount = item.transaction_fee || 0;
+
+  return (
+    <Entry>
+      {/* 
+        "no icon, description, recipient, preriodic icon, categories and no invoice download element" 
+        We omit ImageHolder to strictly follow "no icon".
+      */}
+
+      <ContentWrapper>
+        <MetaInfo>
+          <DateText>
+            {format(parseISO(item.date), 'PPP, HH:mm')}
+            {/* No periodic icon */}
+          </DateText>
+          {/* No description, recipient, categories */}
+        </MetaInfo>
+        <AmountContainer>
+          {/* "The amount number of the fee payment element has red color" -> $negative=true */}
+          <AmountText $negative={true}>
+            {feeAmount.toFixed(2)} €
           </AmountText>
         </AmountContainer>
       </ContentWrapper>

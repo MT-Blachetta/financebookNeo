@@ -434,9 +434,18 @@ def create_payment_item(
         session.commit()
 
     # 7. Compute and apply transaction fee
-    create_fee_record(db_item, current_user.id, session)
+    # create_fee_record returns (fee_amount, adjusted_amount)
+    fee_amount, _ = create_fee_record(db_item, current_user.id, session)
+    
+    # 8. Manually attach the fee amount to the response model
+    # We must convert to PaymentItemRead first because PaymentItem (SQLModel) 
+    # rejects setting attributes that aren't database fields.
+    response_item = PaymentItemRead.model_validate(db_item)
+    
+    if fee_amount > 0:
+        response_item.transaction_fee = fee_amount
 
-    return db_item
+    return response_item
 
 
 @app.get("/payment-items", response_model=List[PaymentItemRead])
@@ -446,7 +455,7 @@ def list_payment_items(
     category_ids: Optional[List[int]] = Query(None, description="List of category IDs to filter by"),
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
-) -> List[PaymentItem]:
+) -> List[PaymentItemRead]:
     import logging
     logging.basicConfig(level=logging.DEBUG)
     logger = logging.getLogger(__name__)
@@ -494,9 +503,30 @@ def list_payment_items(
         logger.info(f"Generated explicit OR logic query for category filtering")
 
     results = session.exec(query).all()
+    
+    # Fetch transaction fees for all these items efficiently
+    item_ids = [item.id for item in results]
+    fee_map = {}
+    if item_ids:
+        fee_records = session.exec(
+            select(TransactionFeeRecord).where(TransactionFeeRecord.payment_item_id.in_(item_ids))
+        ).all()
+        
+        # Create a lookup map
+        fee_map = {r.payment_item_id: r.fee_amount for r in fee_records}
+        
+    # Convert to response models and attach fees
+    output_items = []
+    for item in results:
+        # Validate/convert DB model to Read model
+        read_item = PaymentItemRead.model_validate(item)
+        if item.id in fee_map:
+            read_item.transaction_fee = fee_map[item.id]
+        output_items.append(read_item)
+    
     logger.info(f"Found {len(results)} payment items matching the filters")
     
-    return results
+    return output_items
 
 
 @app.get("/payment-items/{item_id}", response_model=PaymentItemRead)
@@ -510,7 +540,17 @@ def get_payment_item(
         raise HTTPException(status_code=404, detail="Item not found")
     if item.user_id != current_user.id:
         raise HTTPException(status_code=403, detail="Not authorized to access this item")
-    return item
+    
+    # Fetch transaction fee info
+    fee_record = session.exec(
+        select(TransactionFeeRecord).where(TransactionFeeRecord.payment_item_id == item_id)
+    ).first()
+    
+    response_item = PaymentItemRead.model_validate(item)
+    if fee_record:
+        response_item.transaction_fee = fee_record.fee_amount
+        
+    return response_item
 
 
 @app.put("/payment-items/{item_id}", response_model=PaymentItemRead)
@@ -633,8 +673,17 @@ def update_payment_item(
             logger.info("Amount changed, recomputing transaction fee")
             recompute_fee_record(db_item, update_data["amount"], current_user.id, session)
 
+        # 6. Fetch updated fee to return
+        fee_record = session.exec(
+            select(TransactionFeeRecord).where(TransactionFeeRecord.payment_item_id == item_id)
+        ).first()
+
+        response_item = PaymentItemRead.model_validate(db_item)
+        if fee_record:
+            response_item.transaction_fee = fee_record.fee_amount
+
         logger.info(f"Successfully updated payment item {item_id}")
-        return db_item
+        return response_item
         
     except Exception as e:
         logger.error(f"Error updating payment item {item_id}: {str(e)}")

@@ -75,6 +75,7 @@ export interface PaymentItem {
   standard_category?: Category | null; // resolved standard category object
   attachment_url?: string | null; // presigned link to image/PDF on object-store
   invoice_path?: string | null; // filename of uploaded invoice document
+  transaction_fee?: number | null;
 }
 
 /** Helper to distinguish incomes and expenses on the client. */
